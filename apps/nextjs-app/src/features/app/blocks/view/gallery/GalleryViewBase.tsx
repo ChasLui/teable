@@ -10,8 +10,7 @@ import {
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { FieldKeyType } from '@teable/core';
-import { useRowCount, useTableId, useViewId } from '@teable/sdk/hooks';
-import { Record as RecordModel } from '@teable/sdk/model';
+import { useRowCount, useTableId, useViewId, useRecordOperations } from '@teable/sdk/hooks';
 import { cn } from '@teable/ui-lib/shadcn';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Card } from './components/Card';
@@ -24,6 +23,7 @@ export const GalleryViewBase = () => {
   const tableId = useTableId() as string;
   const viewId = useViewId() as string;
   const rowCount = useRowCount() ?? 0;
+  const { updateRecord } = useRecordOperations();
   const { cardDraggable } = permission;
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -102,13 +102,17 @@ export const GalleryViewBase = () => {
 
     updateRecordOrder(actualOldIndex, actualNewIndex);
 
-    RecordModel.updateRecord(tableId, activeId as string, {
-      fieldKeyType: FieldKeyType.Id,
-      record: { fields: {} },
-      order: {
-        viewId,
-        anchorId: overId as string,
-        position: actualOldIndex > actualNewIndex ? 'before' : 'after',
+    updateRecord({
+      tableId,
+      recordId: activeId as string,
+      recordRo: {
+        fieldKeyType: FieldKeyType.Id,
+        record: { fields: {} },
+        order: {
+          viewId,
+          anchorId: overId as string,
+          position: actualOldIndex > actualNewIndex ? 'before' : 'after',
+        },
       },
     });
   };
@@ -134,7 +138,7 @@ export const GalleryViewBase = () => {
             {virtualizer.getVirtualItems().map((virtualRow) => (
               <div
                 key={virtualRow.index}
-                className="absolute left-0 top-0 flex w-full gap-x-4 pb-4"
+                className="absolute start-0 top-0 flex w-full gap-x-4 pb-4"
                 style={{
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,

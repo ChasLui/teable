@@ -27,8 +27,8 @@ export const NotificationActionBar: React.FC<ActionBarProps> = (props) => {
   return (
     <HoverCard openDelay={100} closeDelay={0}>
       <HoverCardTrigger
+        asChild
         onClick={async () => {
-          console.log('ggggggg');
           await commonHandler();
         }}
       >

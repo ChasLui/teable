@@ -1,6 +1,12 @@
-import { Trash2, ArrowUp, ArrowDown, Copy } from '@teable/icons';
+import { History, ArrowUp, ArrowDown, Link, MessageSquare, MessageSquareDot } from '@teable/icons';
 import { useGridViewStore } from '@teable/sdk/components';
-import { useTableId, useTablePermission, useView } from '@teable/sdk/hooks';
+import {
+  useBaseId,
+  useCommentPermission,
+  useTableId,
+  useTablePermission,
+  useView,
+} from '@teable/sdk/hooks';
 import {
   cn,
   Command,
@@ -19,11 +25,14 @@ import {
   PopoverTrigger,
 } from '@teable/ui-lib/shadcn';
 import { noop } from 'lodash';
+import { Archive, CopyPlus, Trash } from 'lucide-react';
 import { useTranslation, Trans } from 'next-i18next';
 import { Fragment, useCallback, useRef, useState } from 'react';
 import { useClickAway } from 'react-use';
+import { useAI } from '@/features/app/hooks/useAI';
+import { useArchiveUpsell } from '@/features/app/hooks/useArchiveUpsell';
+import { useBaseUsage } from '@/features/app/hooks/useBaseUsage';
 import { tableConfig } from '@/features/i18n/table.config';
-import { PluginMenu } from './PluginMenu';
 
 export interface IMenuItemProps<T> {
   type: T;
@@ -44,13 +53,247 @@ interface InsertRecordRender {
 
 enum MenuItemType {
   Copy = 'Copy',
+  CopyLink = 'CopyLink',
   Delete = 'Delete',
+  Archive = 'Archive',
   InsertAbove = 'InsertAbove',
   InsertBelow = 'InsertBelow',
   Duplicate = 'Duplicate',
+  ViewHistory = 'ViewHistory',
+  AddComment = 'AddComment',
+  AddToChat = 'AddToChat',
 }
 
-const iconClassName = 'mr-2 h-4 w-4 shrink-0';
+const iconClassName = 'me-2 h-4 w-4 shrink-0';
+type MenuTranslate = (key: string) => string;
+type RecordMenuState = ReturnType<typeof useGridViewStore.getState>['recordMenu'];
+
+const filterVisibleMenuItems = (items: IMenuItemProps<MenuItemType>[]) =>
+  items.filter(({ hidden }) => !hidden);
+
+const buildInsertMenuItems = ({
+  t,
+  isMultipleSelected,
+  canCreate,
+  isAutoSort,
+  insertRecordFn,
+}: {
+  t: MenuTranslate;
+  isMultipleSelected: boolean;
+  canCreate: boolean;
+  isAutoSort: boolean;
+  insertRecordFn: (num: number, position: 'before' | 'after') => void | null;
+}): IMenuItemProps<MenuItemType>[] => [
+  {
+    type: MenuItemType.InsertAbove,
+    name: t('table:menu.insertRecordAbove'),
+    icon: <ArrowUp className={iconClassName} />,
+    hidden: isMultipleSelected || !canCreate,
+    disabled: isAutoSort,
+    render: (
+      <InsertRecordRender
+        onClick={(num: number) => insertRecordFn(num, 'before')}
+        icon={<ArrowUp className={iconClassName} />}
+        type={MenuItemType.InsertAbove}
+      />
+    ),
+    onClick: () => {
+      noop();
+    },
+  },
+  {
+    type: MenuItemType.InsertBelow,
+    name: t('table:menu.insertRecordBelow'),
+    icon: <ArrowDown className={iconClassName} />,
+    hidden: isMultipleSelected || !canCreate,
+    disabled: isAutoSort,
+    render: (
+      <InsertRecordRender
+        onClick={(num: number) => insertRecordFn(num, 'after')}
+        icon={<ArrowDown className={iconClassName} />}
+        type={MenuItemType.InsertBelow}
+      />
+    ),
+    onClick: () => {
+      noop();
+    },
+  },
+];
+
+const buildDuplicateMenuItems = ({
+  t,
+  tableId,
+  isMultipleSelected,
+  canCreate,
+  canRead,
+  recordMenu,
+}: {
+  t: MenuTranslate;
+  tableId?: string;
+  isMultipleSelected: boolean;
+  canCreate: boolean;
+  canRead: boolean;
+  recordMenu: RecordMenuState;
+}): IMenuItemProps<MenuItemType>[] => [
+  {
+    type: MenuItemType.Duplicate,
+    name: isMultipleSelected
+      ? t('table:menu.duplicateRecords')
+      : t('sdk:expandRecord.duplicateRecord'),
+    icon: <CopyPlus className={iconClassName} />,
+    hidden: !canCreate || !canRead,
+    onClick: () => {
+      if (tableId && recordMenu?.duplicateRecord) {
+        void recordMenu.duplicateRecord();
+      }
+    },
+  },
+  {
+    type: MenuItemType.CopyLink,
+    name: t('sdk:expandRecord.copyRecordUrl'),
+    icon: <Link className={iconClassName} />,
+    hidden: isMultipleSelected,
+    onClick: () => {
+      if (tableId && recordMenu?.copyRecordUrl) {
+        void recordMenu.copyRecordUrl();
+      }
+    },
+  },
+];
+
+const buildCollaborationMenuItems = ({
+  t,
+  tableId,
+  isMultipleSelected,
+  canUpdate,
+  commentReadable,
+  commentWritable,
+  chatEnabled,
+  recordMenu,
+}: {
+  t: MenuTranslate;
+  tableId?: string;
+  isMultipleSelected: boolean;
+  canUpdate: boolean;
+  commentReadable: boolean;
+  commentWritable: boolean;
+  chatEnabled: boolean;
+  recordMenu: RecordMenuState;
+}): IMenuItemProps<MenuItemType>[] => [
+  {
+    type: MenuItemType.ViewHistory,
+    name: t('sdk:expandRecord.recordHistory.showRecordHistory'),
+    icon: <History className={iconClassName} />,
+    hidden: isMultipleSelected || !canUpdate,
+    onClick: () => {
+      if (tableId && recordMenu?.viewRecordHistory) {
+        void recordMenu.viewRecordHistory();
+      }
+    },
+  },
+  {
+    type: MenuItemType.AddComment,
+    // read-only collaborators still get the thread, just not the composer
+    name: commentWritable ? t('sdk:expandRecord.addRecordComment') : t('sdk:comment.title'),
+    icon: <MessageSquare className={iconClassName} />,
+    hidden: isMultipleSelected || !commentReadable,
+    onClick: () => {
+      if (tableId && recordMenu?.addRecordComment) {
+        void recordMenu.addRecordComment();
+      }
+    },
+  },
+  {
+    type: MenuItemType.AddToChat,
+    name: t('table:menu.addToChat'),
+    icon: <MessageSquareDot className={iconClassName} />,
+    hidden: !chatEnabled || !recordMenu?.addToChat,
+    onClick: () => {
+      recordMenu?.addToChat?.();
+    },
+  },
+];
+
+const buildArchiveMenuItems = ({
+  t,
+  canArchive,
+  isMultipleSelected,
+  isUndeletable,
+  tableId,
+  recordMenu,
+  needsUpgrade,
+  upgradeBadge,
+  onUpgradeClick,
+}: {
+  t: MenuTranslate;
+  canArchive: boolean;
+  isMultipleSelected: boolean;
+  isUndeletable: boolean;
+  tableId?: string;
+  recordMenu: RecordMenuState;
+  needsUpgrade: boolean;
+  upgradeBadge: React.ReactNode;
+  onUpgradeClick: () => void;
+}): IMenuItemProps<MenuItemType>[] => {
+  const name = isMultipleSelected
+    ? t('table:menu.archiveAllSelectedRecords')
+    : t('table:menu.archiveRecord');
+  return [
+    {
+      type: MenuItemType.Archive,
+      name,
+      icon: <Archive className={iconClassName} />,
+      hidden: !canArchive || isUndeletable || !recordMenu?.archiveRecords,
+      render: needsUpgrade ? (
+        <div className="flex items-center">
+          <Archive className={iconClassName} />
+          {name}
+          <span className="pointer-events-none ms-2 flex items-center">{upgradeBadge}</span>
+        </div>
+      ) : undefined,
+      onClick: () => {
+        if (needsUpgrade) {
+          onUpgradeClick();
+          return;
+        }
+        if (recordMenu && tableId && recordMenu.archiveRecords) {
+          void recordMenu.archiveRecords();
+        }
+      },
+    },
+  ];
+};
+
+const buildDeleteMenuItems = ({
+  t,
+  canDelete,
+  isMultipleSelected,
+  isUndeletable,
+  tableId,
+  recordMenu,
+}: {
+  t: MenuTranslate;
+  canDelete: boolean;
+  isMultipleSelected: boolean;
+  isUndeletable: boolean;
+  tableId?: string;
+  recordMenu: RecordMenuState;
+}): IMenuItemProps<MenuItemType>[] => [
+  {
+    type: MenuItemType.Delete,
+    name: isMultipleSelected
+      ? t('table:menu.deleteAllSelectedRecords')
+      : t('table:menu.deleteRecord'),
+    icon: <Trash className={iconClassName} />,
+    hidden: !canDelete || isUndeletable,
+    className: 'text-red-500 aria-selected:text-red-500',
+    onClick: () => {
+      if (recordMenu && tableId && recordMenu.deleteRecords) {
+        void recordMenu.deleteRecords();
+      }
+    },
+  },
+];
 
 const InsertRecordRender = (props: InsertRecordRender) => {
   const { onClick, icon, type } = props;
@@ -63,7 +306,7 @@ const InsertRecordRender = (props: InsertRecordRender) => {
     <Button
       variant={'ghost'}
       size="sm"
-      className="size-full h-9 justify-start gap-0 px-4 py-2"
+      className="size-full h-8 justify-start gap-0 px-2"
       onClick={() => {
         onClick(num);
       }}
@@ -110,10 +353,21 @@ export const RecordMenu = () => {
   const { recordMenu, closeRecordMenu } = useGridViewStore();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
   const tableId = useTableId();
+  const baseId = useBaseId();
   const view = useView();
   const viewId = view?.id;
   const permission = useTablePermission();
+  const { commentReadable, commentWritable } = useCommentPermission();
   const recordMenuRef = useRef<HTMLDivElement>(null);
+  const { enable: aiEnable } = useAI();
+  const usage = useBaseUsage({ disabled: !baseId });
+  const chatEnabled = Boolean(aiEnable && usage?.limit?.chatAIEnable);
+  const {
+    archiveUnlocked,
+    badge: archiveUpgradeBadge,
+    needsUpgrade: archiveNeedsUpgrade,
+    handleUpgradeClick: onArchiveUpgradeClick,
+  } = useArchiveUpsell(usage);
 
   useClickAway(recordMenuRef, () => {
     closeRecordMenu();
@@ -140,6 +394,11 @@ export const RecordMenu = () => {
   const visible = Boolean(recordMenu);
   const position = recordMenu?.position;
   const isAutoSort = Boolean(view?.sort && !view.sort?.manualSort);
+  const canCreate = Boolean(permission['record|create']);
+  const canRead = Boolean(permission['record|read']);
+  const canUpdate = Boolean(permission['record|update']);
+  const canDelete = Boolean(permission['record|delete']);
+  const canArchive = Boolean(permission['record|archive'] && archiveUnlocked);
   const style = position
     ? {
         left: position.x,
@@ -148,114 +407,84 @@ export const RecordMenu = () => {
     : {};
 
   const menuItemGroups: IMenuItemProps<MenuItemType>[][] = [
-    [
-      {
-        type: MenuItemType.InsertAbove,
-        name: t('table:menu.insertRecordAbove'),
-        icon: <ArrowUp className={iconClassName} />,
-        hidden: isMultipleSelected || !permission['record|create'],
-        disabled: isAutoSort,
-        render: (
-          <InsertRecordRender
-            onClick={(num: number) => insertRecordFn(num, 'before')}
-            icon={<ArrowUp className={iconClassName} />}
-            type={MenuItemType.InsertAbove}
-          />
-        ),
-        onClick: async () => {
-          noop();
-        },
-      },
-      {
-        type: MenuItemType.InsertBelow,
-        name: t('table:menu.insertRecordBelow'),
-        icon: <ArrowDown className={iconClassName} />,
-        hidden: isMultipleSelected || !permission['record|create'],
-        disabled: isAutoSort,
-        render: (
-          <InsertRecordRender
-            onClick={(num: number) => insertRecordFn(num, 'after')}
-            icon={<ArrowDown className={iconClassName} />}
-            type={MenuItemType.InsertBelow}
-          />
-        ),
-        onClick: async () => {
-          noop();
-        },
-      },
-    ],
-    [
-      {
-        type: MenuItemType.Duplicate,
-        name: t('sdk:expandRecord.duplicateRecord'),
-        icon: <Copy className={iconClassName} />,
-        hidden: isMultipleSelected || !permission['record|create'],
-        onClick: async () => {
-          if (tableId && recordMenu?.duplicateRecord) {
-            await recordMenu.duplicateRecord();
-          }
-        },
-      },
-    ],
-    [],
-    [
-      {
-        type: MenuItemType.Delete,
-        name: isMultipleSelected
-          ? t('table:menu.deleteAllSelectedRecords')
-          : t('table:menu.deleteRecord'),
-        icon: <Trash2 className={iconClassName} />,
-        hidden: !permission['record|delete'],
-        className: 'text-red-500 aria-selected:text-red-500',
-        onClick: async () => {
-          if (recordMenu && tableId && recordMenu.deleteRecords) {
-            await recordMenu.deleteRecords();
-          }
-        },
-      },
-    ],
-  ].map((items) => (items as IMenuItemProps<MenuItemType>[]).filter(({ hidden }) => !hidden));
+    buildInsertMenuItems({
+      isMultipleSelected: Boolean(isMultipleSelected),
+      canCreate,
+      isAutoSort,
+      insertRecordFn,
+      t: t as unknown as MenuTranslate,
+    }),
+    buildDuplicateMenuItems({
+      t: t as unknown as MenuTranslate,
+      tableId,
+      isMultipleSelected: Boolean(isMultipleSelected),
+      canCreate,
+      canRead,
+      recordMenu,
+    }),
+    buildCollaborationMenuItems({
+      t: t as unknown as MenuTranslate,
+      tableId,
+      isMultipleSelected: Boolean(isMultipleSelected),
+      canUpdate,
+      commentReadable,
+      commentWritable,
+      chatEnabled,
+      recordMenu,
+    }),
+    buildArchiveMenuItems({
+      t: t as unknown as MenuTranslate,
+      canArchive,
+      isMultipleSelected: Boolean(isMultipleSelected),
+      isUndeletable: Boolean(record?.undeletable),
+      tableId,
+      recordMenu,
+      needsUpgrade: archiveNeedsUpgrade,
+      upgradeBadge: archiveUpgradeBadge,
+      onUpgradeClick: onArchiveUpgradeClick,
+    }),
+    buildDeleteMenuItems({
+      t: t as unknown as MenuTranslate,
+      canDelete,
+      isMultipleSelected: Boolean(isMultipleSelected),
+      isUndeletable: Boolean(record?.undeletable),
+      tableId,
+      recordMenu,
+    }),
+  ].map(filterVisibleMenuItems);
 
   if (menuItemGroups.every((menuItemGroup) => menuItemGroup.length === 0)) {
     return null;
   }
 
-  const pluginItemIndex = menuItemGroups.length - 2;
   return (
     <>
       <Popover open={visible}>
         <PopoverTrigger asChild style={style} className="absolute">
           <div className="size-0 opacity-0" />
         </PopoverTrigger>
-        <PopoverContent className="size-auto min-w-40 rounded-md p-0" align="start">
+        <PopoverContent
+          className="size-auto min-w-40 rounded-md p-0"
+          align="start"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <Command ref={recordMenuRef} className="rounded-md border-none shadow-none" style={style}>
             <CommandList className="max-h-96">
               {menuItemGroups.map((items, index) => {
-                if (index === pluginItemIndex) {
-                  return (
-                    <PluginMenu
-                      key={`plugin-menu-${tableId}`}
-                      tableId={tableId}
-                      closeRecordMenu={closeRecordMenu}
-                    />
-                  );
-                }
-
                 const nextItems = menuItemGroups[index + 1] ?? [];
-                const hasNextItems = nextItems.length > 0 || index + 1 === pluginItemIndex;
+                const hasNextItems = nextItems.length > 0;
                 if (!items.length) return null;
 
                 return (
                   <Fragment key={index}>
-                    <CommandGroup aria-valuetext="name">
+                    <CommandGroup aria-valuetext="name" className="p-1">
                       {items.map(({ type, name, icon, className, disabled, onClick, render }) => {
                         return (
                           <CommandItem
-                            className={cn('px-4 py-2', className, {
-                              'px-0 py-0': [
-                                MenuItemType.InsertBelow,
-                                MenuItemType.InsertAbove,
-                              ].includes(type),
+                            className={cn('h-8 px-2', className, {
+                              'px-0': [MenuItemType.InsertBelow, MenuItemType.InsertAbove].includes(
+                                type
+                              ),
                             })}
                             key={type}
                             value={name}

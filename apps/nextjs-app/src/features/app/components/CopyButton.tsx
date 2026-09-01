@@ -7,9 +7,12 @@ import { useState } from 'react';
 interface ICopyButtonProps extends ButtonProps {
   text: string;
   iconClassName?: string;
+  className?: string;
+  label?: string;
+  labelClassName?: string;
 }
 export const CopyButton = (props: ICopyButtonProps) => {
-  const { text, iconClassName, ...rest } = props;
+  const { text, iconClassName, className, label, labelClassName, ...rest } = props;
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
   const onCopy = () => {
@@ -21,17 +24,18 @@ export const CopyButton = (props: ICopyButtonProps) => {
   };
 
   return (
-    <Button {...rest} onClick={onCopy}>
+    <Button {...rest} onClick={onCopy} className={className}>
       {isCopied ? (
         <Check
           className={cn(
-            'text-green-400 dark:text-green-600 animate-bounce duration-500 repeat-1',
+            'text-emerald-600 dark:text-emerald-500 animate-bounce duration-500 repeat-1',
             iconClassName
           )}
         />
       ) : (
         <Copy className={iconClassName} />
       )}
+      {label && <span className={cn('text-xs text-foreground', labelClassName)}>{label}</span>}
     </Button>
   );
 };

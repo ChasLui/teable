@@ -13,20 +13,31 @@ import { Dialog, DialogContent, DialogTrigger } from '@teable/ui-lib/shadcn';
 import { isEmpty, isEqual, keyBy } from 'lodash';
 import { useTranslation } from 'next-i18next';
 import { useCallback, useMemo, useState } from 'react';
+import { RequireCom } from '@/features/app/blocks/setting/components/RequireCom';
 import { useAI } from '@/features/app/hooks/useAI';
 import { TimeZoneFormatting } from '../formatting/TimeZoneFormatting';
 import { UnionFormatting } from '../formatting/UnionFormatting';
 import { UnionShowAs } from '../show-as/UnionShowAs';
 
-const calculateTypedValue = (fields: IFieldInstance[], expression?: string) => {
-  const defaultResult = { cellValueType: CellValueType.String, isMultipleCellValue: false };
+const calculateTypedValue = (
+  fields: IFieldInstance[],
+  expression?: string
+): {
+  cellValueType: CellValueType;
+  isMultipleCellValue?: boolean;
+  hasError?: boolean;
+} => {
+  const defaultResult = {
+    cellValueType: CellValueType.String,
+    isMultipleCellValue: false,
+  };
 
   try {
     return expression
       ? FormulaField.getParsedValueType(expression, keyBy(fields, 'id'))
       : defaultResult;
   } catch (e) {
-    return defaultResult;
+    return { ...defaultResult, hasError: true };
   }
 };
 
@@ -47,7 +58,11 @@ export const FormulaOptionsInner = (props: {
       : '';
   }, [expression, fields]);
 
-  const { cellValueType, isMultipleCellValue } = calculateTypedValue(fields, expression);
+  const {
+    cellValueType,
+    isMultipleCellValue,
+    hasError: expressionHasError,
+  } = calculateTypedValue(fields, expression);
 
   const onExpressionChange = (expr: string) => {
     const { cellValueType: newCellValueType } = calculateTypedValue(fields, expr);
@@ -58,7 +73,7 @@ export const FormulaOptionsInner = (props: {
           ? formatting.timeZone
           : options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
-    if (newCellValueType !== cellValueType) {
+    if (newCellValueType !== cellValueType || expressionHasError) {
       const defaultFormatting = getDefaultFormatting(newCellValueType);
       newOptions.formatting = defaultFormatting;
       newOptions.showAs = undefined;
@@ -107,12 +122,15 @@ export const FormulaOptionsInner = (props: {
   );
 
   return (
-    <div className="w-full space-y-2">
+    <div className="border-bordr w-full space-y-4 border-t pt-4">
       <div className="space-y-2">
-        <span className="neutral-content label-text">{t('field.default.formula.formula')}</span>
+        <span className="neutral-content text-sm font-medium">
+          {t('field.default.formula.formula')}
+          <RequireCom />
+        </span>
         <Dialog open={visible} onOpenChange={setVisible}>
           <DialogTrigger asChild>
-            <code className="block min-h-[36px] cursor-pointer items-center whitespace-pre-wrap break-words rounded-md border border-input bg-background px-3 py-2 ring-offset-background">
+            <code className="block min-h-[36px] cursor-pointer items-center whitespace-pre-wrap break-words rounded-md border border-input bg-transparent px-3 py-2 ring-offset-background dark:bg-input">
               {expressionByName}
             </code>
           </DialogTrigger>

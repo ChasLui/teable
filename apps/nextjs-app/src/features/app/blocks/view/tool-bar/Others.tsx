@@ -1,90 +1,130 @@
-import { ArrowUpRight, Code2, Database, MoreHorizontal } from '@teable/icons';
-import { useBaseId, useTableId, useTablePermission } from '@teable/sdk/hooks';
+import { MoreHorizontal, Share2 } from '@teable/icons';
+import { useIsReadOnlyPreview, useTableId, useTablePermission, useView } from '@teable/sdk/hooks';
 import { Button, cn, Popover, PopoverContent, PopoverTrigger } from '@teable/ui-lib/shadcn';
-import Link from 'next/link';
 import { useTranslation } from 'next-i18next';
-import { GUIDE_API_BUTTON } from '@/components/Guide';
+import { useMemo, useState } from 'react';
+import { useBaseNodeContext } from '@/features/app/blocks/base/base-node/hooks/useBaseNodeContext';
+import { useSharedNodeIds } from '@/features/app/blocks/base/base-side-bar/BaseNodeShareIndicator';
+import { useShareEffectiveEdit } from '@/features/app/context/ShareContext';
+import { tableConfig } from '@/features/i18n/table.config';
 import { SearchButton } from '../search/SearchButton';
 import { PersonalViewSwitch } from './components';
-import { SharePopover } from './SharePopover';
+import { UndoRedoButtons } from './components/UndoRedoButtons';
 import { ToolBarButton } from './ToolBarButton';
+import { UnifiedShareDialog } from './UnifiedShareDialog';
 
-const OthersList = ({
-  classNames,
-  className,
+const ShareButton = ({
+  textClassName,
+  buttonClassName,
+  foldButton,
 }: {
-  classNames?: { textClassName?: string; buttonClassName?: string };
-  className?: string;
+  textClassName?: string;
+  buttonClassName?: string;
+  foldButton?: boolean;
 }) => {
+  const { t } = useTranslation(tableConfig.i18nNamespaces);
   const permission = useTablePermission();
-  const { t } = useTranslation('table');
-  const baseId = useBaseId() as string;
+  const view = useView();
   const tableId = useTableId();
+  const { treeItems } = useBaseNodeContext();
+  const { sharedNodeIds } = useSharedNodeIds();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [defaultTab, setDefaultTab] = useState<'table' | 'view'>('table');
 
-  const { textClassName, buttonClassName } = classNames ?? {};
+  const isNodeShared = useMemo(() => {
+    if (!tableId) return false;
+    const entry = Object.entries(treeItems).find(([, item]) => item.resourceId === tableId);
+    return entry ? sharedNodeIds.has(entry[0]) : false;
+  }, [tableId, treeItems, sharedNodeIds]);
+
+  const isActive = !!view?.enableShare || isNodeShared;
+  const text = t('table:toolbar.others.share.label');
+
+  const openDialog = (tab: 'table' | 'view') => {
+    setDefaultTab(tab);
+    setPopoverOpen(false);
+    setDialogOpen(true);
+  };
 
   return (
-    <div className={cn('gap-1', className)}>
-      <SharePopover>
-        {(text, isActive) => (
+    <>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger asChild>
           <ToolBarButton
             isActive={isActive}
             text={text}
             textClassName={textClassName}
-            className={buttonClassName}
+            className={cn(buttonClassName, { 'w-full justify-start rounded-sm': foldButton })}
             disabled={!permission['view|update']}
           >
-            <ArrowUpRight className="size-4" />
-          </ToolBarButton>
-        )}
-      </SharePopover>
-      <Popover>
-        <PopoverTrigger asChild>
-          <ToolBarButton
-            text="API"
-            className={cn(GUIDE_API_BUTTON, buttonClassName)}
-            textClassName={textClassName}
-          >
-            <Code2 className="size-4" />
+            <Share2 className="size-4 shrink-0" />
           </ToolBarButton>
         </PopoverTrigger>
-        <PopoverContent side="bottom" align="start" className="w-48 p-0">
+        <PopoverContent className="flex w-auto flex-col p-1" align="start">
           <Button
-            variant={'ghost'}
-            size={'xs'}
-            className="w-full justify-start font-normal"
-            asChild
+            variant="ghost"
+            className="justify-between gap-6 px-2"
+            size="sm"
+            onClick={() => openDialog('table')}
           >
-            <Link
-              href={{
-                pathname: '/developer/tool/query-builder',
-                query: { baseId, tableId },
-              }}
-              target="_blank"
-            >
-              <Code2 className="size-4" />
-              {t('toolbar.others.api.restfulApi')}
-            </Link>
+            <span>{t('table:baseShare.shareTableTab')}</span>
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                isNodeShared ? 'bg-emerald-500' : 'bg-muted-foreground/25'
+              )}
+            />
           </Button>
           <Button
-            variant={'ghost'}
-            size={'xs'}
-            className="w-full justify-start font-normal"
-            asChild
+            variant="ghost"
+            className="justify-between gap-6 px-2"
+            size="sm"
+            onClick={() => openDialog('view')}
           >
-            <Link
-              href={{
-                pathname: '/base/[baseId]/design',
-                query: { baseId, tableId },
-              }}
-            >
-              <Database className="pr-1 text-lg" />
-              {t('toolbar.others.api.databaseConnection')}
-            </Link>
+            <span>{t('table:baseShare.shareViewTab')}</span>
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                view?.enableShare ? 'bg-emerald-500' : 'bg-muted-foreground/25'
+              )}
+            />
           </Button>
         </PopoverContent>
       </Popover>
-      <PersonalViewSwitch textClassName={textClassName} buttonClassName={buttonClassName} />
+      <UnifiedShareDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        defaultTab={defaultTab}
+        showTabs={false}
+      />
+    </>
+  );
+};
+
+const OthersList = ({
+  classNames,
+  className,
+  foldButton,
+}: {
+  classNames?: { textClassName?: string; buttonClassName?: string };
+  className?: string;
+  foldButton?: boolean;
+}) => {
+  const { textClassName, buttonClassName } = classNames ?? {};
+
+  return (
+    <div className={cn('gap-1 flex items-center', className)}>
+      <ShareButton
+        textClassName={textClassName}
+        buttonClassName={buttonClassName}
+        foldButton={foldButton}
+      />
+      {!foldButton && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
+      <PersonalViewSwitch
+        textClassName={textClassName}
+        buttonClassName={cn(buttonClassName, { 'w-full justify-start ps-2': foldButton })}
+      />
     </div>
   );
 };
@@ -95,16 +135,17 @@ const OthersMenu = ({ className }: { className?: string }) => {
       <PopoverTrigger asChild>
         <Button
           variant={'ghost'}
-          size={'xs'}
+          size={'icon-xs'}
           className={cn('font-normal shrink-0 truncate', className)}
         >
-          <MoreHorizontal className="size-4" />
+          <MoreHorizontal className="size-4 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="start" className="w-40 p-0">
+      <PopoverContent side="bottom" align="start" className="w-40 p-1">
         <OthersList
-          className="flex flex-col"
+          className="flex w-full flex-col items-start"
           classNames={{ textClassName: 'inline', buttonClassName: 'justify-start rounded-none' }}
+          foldButton={true}
         />
       </PopoverContent>
     </Popover>
@@ -112,14 +153,41 @@ const OthersMenu = ({ className }: { className?: string }) => {
 };
 
 export const Others: React.FC = () => {
+  const isReadOnlyPreview = useIsReadOnlyPreview();
+  const isShareEditor = useShareEffectiveEdit();
+  const showControls = !isReadOnlyPreview || isShareEditor;
   return (
-    <div className="flex flex-1 justify-end @container/toolbar-others md:gap-1">
-      <SearchButton />
-      <OthersList
-        className="hidden @md/toolbar:flex"
-        classNames={{ textClassName: '@[300px]/toolbar-others:inline' }}
-      />
-      <OthersMenu className="@md/toolbar:hidden" />
+    <div
+      className={cn(
+        'flex shrink-0 items-center justify-end ps-6 md:gap-0',
+        // The fade covers the toolbar scrolling in from the logical start, so the
+        // gradient has to start on that same side — 90deg points the wrong way
+        // once the padding moves.
+        'bg-[linear-gradient(90deg,rgba(255,255,255,0)_0%,hsl(var(--background))_5%)]',
+        'rtl:bg-[linear-gradient(270deg,rgba(255,255,255,0)_0%,hsl(var(--background))_5%)]',
+        'dark:bg-[linear-gradient(90deg,rgba(0,0,0,0)_0%,hsl(var(--background))_5%)]',
+        'dark:rtl:bg-[linear-gradient(270deg,rgba(0,0,0,0)_0%,hsl(var(--background))_5%)]'
+      )}
+    >
+      <SearchButton className="size-7 shrink-0" />
+      {showControls && (
+        <>
+          <div className="mx-1 h-4 w-px shrink-0 bg-border"></div>
+          <UndoRedoButtons />
+          <div className="mx-1 h-4 w-px shrink-0 bg-border"></div>
+          {isShareEditor ? (
+            <PersonalViewSwitch />
+          ) : (
+            <>
+              <OthersList
+                className="hidden @md/toolbar:flex"
+                classNames={{ textClassName: '@2xl/toolbar:inline' }}
+              />
+              <OthersMenu className="@md/toolbar:hidden" />
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 };

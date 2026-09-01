@@ -1,9 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type { ExcludeAction, IRole, TableAction } from '@teable/core';
-import { ActionPrefix, actionPrefixMap, getPermissionMap } from '@teable/core';
+import { Injectable } from '@nestjs/common';
+import type { Action, ExcludeAction, TableAction } from '@teable/core';
+import {
+  ActionPrefix,
+  actionPrefixMap,
+  getPermissionMap,
+  HttpErrorCode,
+  TemplateRolePermission,
+} from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { pick } from 'lodash';
 import { ClsService } from 'nestjs-cls';
+import { CustomHttpException } from '../../custom.exception';
 import type { IClsStore } from '../../types/cls';
 import { getMaxLevelRole } from '../../utils/get-max-level-role';
 
@@ -29,6 +36,13 @@ export class TablePermissionService {
     baseId: string,
     tableIds?: string[]
   ): Promise<Record<string, Record<ExcludeAction<TableAction, 'table|create'>, boolean>>> {
+    if (this.cls.get('template')) {
+      return this.getTablePermissionMapByPermissions(baseId, TemplateRolePermission, tableIds);
+    }
+    // Handle base share access - use same read-only permissions as template
+    if (this.cls.get('baseShare')) {
+      return this.getTablePermissionMapByPermissions(baseId, TemplateRolePermission, tableIds);
+    }
     const userId = this.cls.get('user.id');
     const departmentIds = this.cls.get('organization.departments')?.map((d) => d.id);
     const base = await this.prismaService
@@ -37,7 +51,11 @@ export class TablePermissionService {
         where: { id: baseId },
       })
       .catch(() => {
-        throw new NotFoundException('Base not found');
+        throw new CustomHttpException('Base not found', HttpErrorCode.NOT_FOUND, {
+          localization: {
+            i18nKey: 'httpErrors.base.notFound',
+          },
+        });
       });
     const collaborators = await this.prismaService.txClient().collaborator.findMany({
       where: {
@@ -46,20 +64,28 @@ export class TablePermissionService {
       },
     });
     if (collaborators.length === 0) {
-      throw new NotFoundException('Collaborator not found');
+      throw new CustomHttpException('Collaborator not found', HttpErrorCode.NOT_FOUND, {
+        localization: {
+          i18nKey: 'httpErrors.collaborator.notFound',
+        },
+      });
     }
     const roleName = getMaxLevelRole(collaborators);
-    return this.getTablePermissionMapByRole(baseId, roleName, tableIds);
+    return this.getTablePermissionMapByPermissions(baseId, getPermissionMap(roleName), tableIds);
   }
 
-  async getTablePermissionMapByRole(baseId: string, roleName: IRole, tableIds?: string[]) {
+  private async getTablePermissionMapByPermissions(
+    baseId: string,
+    permissions: Record<Action, boolean>,
+    tableIds?: string[]
+  ) {
     const tables = await this.prismaService.txClient().tableMeta.findMany({
       where: { baseId, deletedTime: null, id: { in: tableIds } },
     });
     return tables.reduce(
       (acc, table) => {
         acc[table.id] = pick(
-          getPermissionMap(roleName),
+          permissions,
           actionPrefixMap[ActionPrefix.Table].filter(
             (action) => action !== 'table|create'
           ) as ExcludeAction<TableAction, 'table|create'>[]

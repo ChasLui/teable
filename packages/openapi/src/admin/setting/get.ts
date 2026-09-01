@@ -1,18 +1,30 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { axios } from '../../axios';
+import { mailTransportConfigSchema } from '../../mail';
 import { registerRoute } from '../../utils';
-import { aiConfigVoSchema } from './update';
+import { aiConfigVoSchema, appConfigSchema, canaryConfigSchema, imConfigSchema } from './update';
 
 export const settingVoSchema = z.object({
   instanceId: z.string(),
-  brandName: z.string().nullable(),
-  brandLogo: z.string().nullable(),
-  disallowSignUp: z.boolean().nullable(),
-  disallowSpaceCreation: z.boolean().nullable(),
-  disallowSpaceInvitation: z.boolean().nullable(),
-  enableEmailVerification: z.boolean().nullable(),
-  aiConfig: aiConfigVoSchema.nullable(),
+  brandName: z.string().nullable().optional(),
+  brandLogo: z.string().nullable().optional(),
+  disallowSignUp: z.boolean().nullable().optional(),
+  bannedEmailDomains: z.array(z.string()).nullable().optional(),
+  disallowSpaceCreation: z.boolean().nullable().optional(),
+  disallowSpaceInvitation: z.boolean().nullable().optional(),
+  disallowDashboard: z.boolean().nullable().optional(),
+  enableEmailVerification: z.boolean().nullable().optional(),
+  enableWaitlist: z.boolean().nullable().optional(),
+  enableCreditReward: z.boolean().nullable().optional(),
+  aiConfig: aiConfigVoSchema.nullable().optional(),
+  notifyMailTransportConfig: mailTransportConfigSchema.nullable().optional(),
+  automationMailTransportConfig: mailTransportConfigSchema.nullable().optional(),
+  appConfig: appConfigSchema.nullable().optional(),
+  canaryConfig: canaryConfigSchema.nullable().optional(),
+  trashCleanupEnabledAt: z.string().nullable().optional(),
+  imConfig: imConfigSchema.nullable().optional(),
+  createdTime: z.string().optional(),
 });
 
 export type ISettingVo = z.infer<typeof settingVoSchema>;

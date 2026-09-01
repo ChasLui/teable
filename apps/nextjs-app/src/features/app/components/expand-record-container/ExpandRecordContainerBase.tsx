@@ -1,4 +1,5 @@
-import type { IRecord } from '@teable/core';
+import type { IAttachmentCellValue, IRecord } from '@teable/core';
+import type { IButtonClickStatusHook } from '@teable/sdk';
 import { ExpandRecorder, ExpandRecordModel } from '@teable/sdk';
 import { useRouter } from 'next/router';
 import { forwardRef, useImperativeHandle, useState } from 'react';
@@ -12,12 +13,31 @@ export const ExpandRecordContainerBase = forwardRef<
     recordServerData?: IRecord;
     onClose?: () => void;
     onUpdateRecordIdCallback?: (recordId: string) => void;
+    buttonClickStatusHook?: IButtonClickStatusHook;
+    onAttachmentDownload?: (attachments: IAttachmentCellValue) => void;
   }
 >((props, forwardRef) => {
-  const { tableId, viewId, recordServerData, onClose, onUpdateRecordIdCallback } = props;
+  const {
+    tableId,
+    viewId,
+    recordServerData,
+    onClose,
+    onUpdateRecordIdCallback,
+    buttonClickStatusHook,
+    onAttachmentDownload,
+  } = props;
   const router = useRouter();
-  const recordId = router.query.recordId as string;
-  const commentId = router.query.commentId as string;
+  const {
+    recordId: routerRecordId,
+    commentId: routerCommentId,
+    showHistory: routerShowHistory,
+    showComment: routerShowComment,
+  } = router.query;
+  const recordId = routerRecordId as string;
+  const commentId = routerCommentId as string;
+  const showHistory = routerShowHistory === 'true';
+  const showComment = { true: true, false: false }[routerShowComment as string];
+
   const [recordIds, setRecordIds] = useState<string[]>();
 
   useImperativeHandle(forwardRef, () => ({
@@ -35,6 +55,10 @@ export const ExpandRecordContainerBase = forwardRef<
       model={ExpandRecordModel.Modal}
       onClose={onClose}
       onUpdateRecordIdCallback={onUpdateRecordIdCallback}
+      buttonClickStatusHook={buttonClickStatusHook}
+      showHistory={showHistory}
+      showComment={showComment}
+      onAttachmentDownload={onAttachmentDownload}
     />
   );
 });

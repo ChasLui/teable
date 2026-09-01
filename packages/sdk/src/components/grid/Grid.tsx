@@ -3,6 +3,7 @@ import { uniqueId } from 'lodash';
 import type { CSSProperties, ForwardRefRenderFunction } from 'react';
 import { useState, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { useRafState } from 'react-use';
+import { LoadingIndicator, ErrorIndicator } from './components';
 import type { IGridTheme } from './configs';
 import { gridTheme, GRID_DEFAULT, DEFAULT_SCROLL_STATE, DEFAULT_MOUSE_STATE } from './configs';
 import { useResizeObserver } from './hooks';
@@ -24,6 +25,9 @@ import type {
   ILinearRow,
   IGroupCollection,
   DragRegionType,
+  IColumnLoading,
+  IRange,
+  ICellError,
 } from './interface';
 import {
   RegionType,
@@ -36,12 +40,13 @@ import type { ISpriteMap, CombinedSelection, IIndicesMap } from './managers';
 import { CoordinateManager, SpriteManager, ImageManager } from './managers';
 import { getCellRenderer, type ICell, type IInnerCell } from './renderers';
 import { TouchLayer } from './TouchLayer';
-import { measuredCanvas } from './utils';
+import { getMaxFreezeColumnCount, getRowControlExtraWidth, measuredCanvas } from './utils';
 
 export interface IGridExternalProps {
   theme?: Partial<IGridTheme>;
   customIcons?: ISpriteMap;
   rowControls?: IRowControlItem[];
+  rowControlPaddingX?: number;
   smoothScrollX?: boolean;
   smoothScrollY?: boolean;
   scrollBufferX?: number;
@@ -80,6 +85,13 @@ export interface IGridExternalProps {
    * @type {boolean}
    */
   isMultiSelectionEnable?: boolean;
+  isRowClickSelectionEnabled?: boolean;
+
+  /**
+   * Keep the cursor on the active cell after Enter instead of moving to the next
+   * row, so the caller can follow a record that re-positions on edit.
+   */
+  disableEnterMoveDown?: boolean;
 
   groupCollection?: IGroupCollection | null;
   collapsedGroupIds?: Set<string> | null;
@@ -91,10 +103,12 @@ export interface IGridExternalProps {
   onPaste?: (selection: CombinedSelection, e: React.ClipboardEvent) => void;
   onDelete?: (selection: CombinedSelection) => void;
   onCellEdited?: (cell: ICellItem, newValue: IInnerCell) => void;
+  onCellDblClick?: (cell: ICellItem) => void;
   onSelectionChanged?: (selection: CombinedSelection) => void;
   onVisibleRegionChanged?: (rect: IRectangle) => void;
   onCollapsedGroupChanged?: (collapsedGroupIds: Set<string>) => void;
   onColumnFreeze?: (freezeColumnCount: number) => void;
+  onColumnFreezeFailed?: () => void;
   onColumnAppend?: () => void;
   onRowExpand?: (rowIndex: number) => void;
   onRowAppend?: (targetIndex?: number) => void;
@@ -106,18 +120,42 @@ export interface IGridExternalProps {
   onColumnHeaderMenuClick?: (colIndex: number, bounds: IRectangle) => void;
   onColumnStatisticClick?: (colIndex: number, bounds: IRectangle) => void;
   onContextMenu?: (selection: CombinedSelection, position: IPosition) => void;
+  onGroupHeaderContextMenu?: (groupId: string, position: IPosition) => void;
   onScrollChanged?: (scrollLeft: number, scrollTop: number) => void;
   onDragStart?: (type: DragRegionType, dragIndexs: number[]) => void;
 
   /**
    * Triggered when the mouse hovers over the every type of region
    */
-  onItemHovered?: (type: RegionType, bounds: IRectangle, cellItem: ICellItem) => void;
+  onItemHovered?: (
+    type: RegionType,
+    bounds: IRectangle,
+    cellItem: ICellItem,
+    data?: unknown
+  ) => void;
 
   /**
    * Triggered when the mouse clicks the every type of region
    */
   onItemClick?: (type: RegionType, bounds: IRectangle, cellItem: ICellItem) => void;
+
+  /**
+   * Triggered when user drags the fill handle downward to auto-fill cells
+   * Only vertical fill is supported. Provides current selection ranges and the target end real row index
+   */
+  onFillSelection?: (selectionRanges: [IRange, IRange], targetEndRealRowIndex: number) => void;
+
+  /**
+   * Triggered when user clicks a row control (checkbox, expand, drag)
+   * For checkbox: checked indicates the state after click (true = selected, false = deselected)
+   */
+  onRowControlClick?: (rowIndex: number, type: RowControlType, checked: boolean) => void;
+
+  /**
+   * Triggered when user shift+clicks to select a range of rows
+   * Provides the row ranges selected (can be used to fetch recordIds via API)
+   */
+  onRowRangeSelected?: (ranges: IRange[]) => void;
 }
 
 export interface IGridProps extends IGridExternalProps {
@@ -128,7 +166,7 @@ export interface IGridProps extends IGridExternalProps {
   rowHeight?: number;
   style?: CSSProperties;
   isTouchDevice?: boolean;
-  columnHeaderVisible?: boolean;
+  columnHeaderHeight?: number;
   columnStatistics?: IColumnStatistics;
   getCellContent: (cell: ICellItem) => ICell;
 }
@@ -143,8 +181,18 @@ export interface IGridRef {
   scrollBy: (deltaX: number, deltaY: number) => void;
   scrollTo: (scrollLeft?: number, scrollTop?: number) => void;
   scrollToItem: (position: [columnIndex: number, rowIndex: number]) => void;
+  setActiveCell: (cell: ICellItem | null) => void;
   getCellIndicesAtPosition: (x: number, y: number) => ICellItem | null;
   getContainer: () => HTMLDivElement | null;
+  getCellBounds: (cell: ICellItem) => IRectangle | null;
+  getFreezeColumnState: () => {
+    effectiveFreezeColumnCount: number;
+    maxFreezeColumnCount: number;
+  };
+  setCellLoading: (cells: ICellItem[]) => void;
+  setColumnLoadings: (columnLoadings: IColumnLoading[]) => void;
+  setCellErrors: (cellErrors: ICellError[]) => void;
+  isEditing: () => boolean | undefined;
 }
 
 const {
@@ -172,6 +220,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     rowCount: originRowCount,
     rowHeight = defaultRowHeight,
     rowControls = [{ type: RowControlType.Checkbox }],
+    rowControlPaddingX = 0,
     theme: customTheme,
     isTouchDevice,
     smoothScrollX = true,
@@ -181,13 +230,15 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     scrollBarVisible = true,
     rowIndexVisible = true,
     isMultiSelectionEnable = true,
+    isRowClickSelectionEnabled = true,
+    disableEnterMoveDown = false,
     style,
     customIcons,
     collaborators,
     searchCursor,
     searchHitIndex,
     groupPoints,
-    columnHeaderVisible = true,
+    columnHeaderHeight = defaultColumnHeaderHeight,
     getCellContent,
     onUndo,
     onRedo,
@@ -198,6 +249,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     onRowExpand,
     onRowOrdered,
     onCellEdited,
+    onCellDblClick,
     onColumnAppend,
     onColumnResize,
     onColumnOrdered,
@@ -206,14 +258,19 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     onSelectionChanged,
     onVisibleRegionChanged,
     onColumnFreeze,
+    onColumnFreezeFailed,
     onColumnHeaderClick,
     onColumnHeaderDblClick,
     onColumnHeaderMenuClick,
     onColumnStatisticClick,
     onCollapsedGroupChanged,
+    onGroupHeaderContextMenu,
     onItemHovered,
     onItemClick,
     onScrollChanged,
+    onFillSelection,
+    onRowControlClick,
+    onRowRangeSelected,
   } = props;
 
   useImperativeHandle(forwardRef, () => ({
@@ -231,6 +288,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     scrollBy,
     scrollTo,
     scrollToItem,
+    setActiveCell,
     getScrollState: () => scrollState,
     getCellIndicesAtPosition: (x: number, y: number): ICellItem | null => {
       const { scrollLeft, scrollTop } = scrollState;
@@ -244,6 +302,48 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
       return [columnIndex, realIndex];
     },
     getContainer: () => containerRef.current,
+    getFreezeColumnState: () => ({
+      effectiveFreezeColumnCount,
+      maxFreezeColumnCount,
+    }),
+    setCellLoading: (cells: ICellItem[]) => {
+      setCellLoadings(cells);
+    },
+    setColumnLoadings: (columnLoadings: IColumnLoading[]) => {
+      setColumnLoadings(columnLoadings);
+    },
+    setCellErrors: (cellErrors: ICellError[]) => {
+      setCellErrors(cellErrors);
+    },
+    getCellBounds: (cell: ICellItem) => {
+      const [columnIndex, _rowIndex] = cell;
+      const rowIndex = real2RowIndex(_rowIndex);
+      const { scrollLeft, scrollTop } = scrollState;
+
+      const columnOffsetX = coordInstance.getColumnRelativeOffset(columnIndex, scrollLeft);
+      const columnWidth = coordInstance.getColumnWidth(columnIndex);
+
+      if (columnOffsetX == null || columnWidth == null) {
+        return null;
+      }
+
+      const rowOffsetY = coordInstance.getRowOffset(rowIndex);
+      const rowHeight = coordInstance.getRowHeight(rowIndex);
+
+      if (rowOffsetY == null || rowHeight == null) {
+        return null;
+      }
+
+      return {
+        x: columnOffsetX,
+        y: rowOffsetY - scrollTop,
+        width: columnWidth,
+        height: rowHeight,
+      };
+    },
+    isEditing: () => {
+      return interactionLayerRef.current?.isEditing();
+    },
   }));
 
   const hasAppendRow = onRowAppend != null;
@@ -258,6 +358,9 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
   const [mouseState, setMouseState] = useState<IMouseState>(DEFAULT_MOUSE_STATE);
   const [scrollState, setScrollState] = useState<IScrollState>(DEFAULT_SCROLL_STATE);
   const [activeCell, setActiveCell] = useRafState<ICellItem | null>(null);
+  const [cellLoadings, setCellLoadings] = useState<ICellItem[]>([]);
+  const [columnLoadings, setColumnLoadings] = useState<IColumnLoading[]>([]);
+  const [cellErrors, setCellErrors] = useState<ICellError[]>([]);
   const scrollerRef = useRef<ScrollerRef | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionLayerRef = useRef<IInteractionLayerRef | null>(null);
@@ -274,8 +377,27 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
   const { iconSizeMD } = theme;
 
   const columnInitSize = useMemo(() => {
-    return !rowIndexVisible && !rowControlCount ? 0 : Math.max(rowControlCount, 2) * iconSizeMD;
-  }, [rowControlCount, rowIndexVisible, iconSizeMD]);
+    if (!rowIndexVisible && !rowControlCount) return 0;
+    return (
+      Math.max(rowControlCount, 2) * iconSizeMD +
+      getRowControlExtraWidth(theme, rowControlPaddingX) * 2
+    );
+  }, [rowControlCount, rowIndexVisible, iconSizeMD, theme, rowControlPaddingX]);
+
+  const maxFreezeColumnCount = useMemo(() => {
+    if (width <= 0) {
+      return freezeColumnCount;
+    }
+
+    return getMaxFreezeColumnCount({
+      containerWidth: width,
+      columnInitSize,
+      columnCount,
+      getColumnWidth: (index) => columns[index]?.width || defaultColumnWidth,
+    });
+  }, [freezeColumnCount, columnInitSize, columnCount, columns, width]);
+
+  const effectiveFreezeColumnCount = Math.min(freezeColumnCount, maxFreezeColumnCount);
 
   const defaultRowsInfo = useMemo(() => {
     return {
@@ -412,16 +534,16 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
       pureRowCount,
       rowCount,
       columnCount,
-      freezeColumnCount,
+      freezeColumnCount: effectiveFreezeColumnCount,
       containerWidth: width,
       containerHeight,
-      rowInitSize: columnHeaderVisible ? defaultColumnHeaderHeight : 0,
+      rowInitSize: columnHeaderHeight,
       columnInitSize,
       rowHeightMap,
       columnWidthMap,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowHeight, pureRowCount, rowCount, rowHeightMap, columnHeaderVisible]);
+  }, [rowHeight, pureRowCount, rowCount, rowHeightMap, columnHeaderHeight]);
 
   const totalHeight = coordInstance.totalHeight + scrollBufferY;
 
@@ -433,9 +555,9 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
   useMemo(() => {
     coordInstance.containerWidth = width;
     coordInstance.containerHeight = containerHeight;
-    coordInstance.freezeColumnCount = freezeColumnCount;
+    coordInstance.freezeColumnCount = effectiveFreezeColumnCount;
     setForceRenderFlag(uniqueId('grid_'));
-  }, [coordInstance, width, containerHeight, freezeColumnCount]);
+  }, [coordInstance, width, containerHeight, effectiveFreezeColumnCount]);
 
   const activeCellBound = useMemo(() => {
     if (activeColumnIndex == null || activeRowIndex == null) {
@@ -500,33 +622,42 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
 
   const scrollToItem = useCallback(
     (position: [columnIndex: number, rowIndex: number]) => {
-      const { containerHeight, containerWidth, freezeRegionWidth, freezeColumnCount, rowInitSize } =
-        coordInstance;
-      const { scrollTop, scrollLeft } = scrollState;
-      const [columnIndex, _rowIndex] = position;
-      const rowIndex = real2RowIndex(_rowIndex);
-      const isFreezeColumn = columnIndex < freezeColumnCount;
+      try {
+        const {
+          containerHeight,
+          containerWidth,
+          freezeRegionWidth,
+          freezeColumnCount,
+          rowInitSize,
+        } = coordInstance;
+        const { scrollTop, scrollLeft } = scrollState;
+        const [columnIndex, _rowIndex] = position;
+        const rowIndex = real2RowIndex(_rowIndex);
+        const isFreezeColumn = columnIndex < freezeColumnCount;
 
-      if (!isFreezeColumn) {
-        const offsetX = coordInstance.getColumnOffset(columnIndex);
-        const columnWidth = coordInstance.getColumnWidth(columnIndex);
-        const deltaLeft = Math.min(offsetX - scrollLeft - freezeRegionWidth, 0);
-        const deltaRight = Math.max(offsetX + columnWidth - scrollLeft - containerWidth, 0);
-        const sl = scrollLeft + deltaLeft + deltaRight;
-        if (sl !== scrollLeft) {
-          const scrollBuffer =
-            deltaLeft < 0 ? -cellScrollBuffer : deltaRight > 0 ? cellScrollBuffer : 0;
-          scrollTo(sl + scrollBuffer, undefined);
+        if (!isFreezeColumn) {
+          const offsetX = coordInstance.getColumnOffset(columnIndex);
+          const columnWidth = coordInstance.getColumnWidth(columnIndex);
+          const deltaLeft = Math.min(offsetX - scrollLeft - freezeRegionWidth, 0);
+          const deltaRight = Math.max(offsetX + columnWidth - scrollLeft - containerWidth, 0);
+          const sl = scrollLeft + deltaLeft + deltaRight;
+          if (sl !== scrollLeft) {
+            const scrollBuffer =
+              deltaLeft < 0 ? -cellScrollBuffer : deltaRight > 0 ? cellScrollBuffer : 0;
+            scrollTo(sl + scrollBuffer, undefined);
+          }
         }
-      }
 
-      const rowHeight = coordInstance.getRowHeight(rowIndex);
-      const offsetY = coordInstance.getRowOffset(rowIndex);
-      const deltaTop = Math.min(offsetY - scrollTop - rowInitSize, 0);
-      const deltaBottom = Math.max(offsetY + rowHeight - scrollTop - containerHeight, 0);
-      const st = scrollTop + deltaTop + deltaBottom;
-      if (st !== scrollTop) {
-        scrollTo(undefined, st);
+        const rowHeight = coordInstance.getRowHeight(rowIndex);
+        const offsetY = coordInstance.getRowOffset(rowIndex);
+        const deltaTop = Math.min(offsetY - scrollTop - rowInitSize, 0);
+        const deltaBottom = Math.max(offsetY + rowHeight - scrollTop - containerHeight, 0);
+        const st = scrollTop + deltaTop + deltaBottom;
+        if (st !== scrollTop) {
+          scrollTo(undefined, st);
+        }
+      } catch (error) {
+        console.error('scrollToItem error', error);
       }
     },
     [coordInstance, scrollState, scrollTo, real2RowIndex]
@@ -539,7 +670,12 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
   const { rowInitSize } = coordInstance;
 
   return (
-    <div className="size-full" style={style} ref={ref}>
+    // The grid keeps a left-to-right frame even under an RTL UI: column order,
+    // freeze offsets and the horizontal scroller's `scrollLeft` are all
+    // left-anchored, and RTL `scrollLeft` semantics differ per browser.
+    // Mirroring the column order is a separate, much larger change; cell text
+    // still follows its own content direction on the canvas.
+    <div dir="ltr" className="size-full" style={style} ref={ref}>
       <div
         data-t-grid-container
         ref={containerRef}
@@ -557,6 +693,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             mouseState={mouseState}
             scrollState={scrollState}
             rowControls={rowControls}
+            rowControlPaddingX={rowControlPaddingX}
             collaborators={collaborators}
             searchCursor={searchCursor}
             searchHitIndex={searchHitIndex}
@@ -565,7 +702,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             coordInstance={coordInstance}
             columnStatistics={columnStatistics}
             collapsedGroupIds={collapsedGroupIds}
-            columnHeaderVisible={columnHeaderVisible}
+            columnHeaderHeight={columnHeaderHeight}
             forceRenderFlag={forceRenderFlag}
             rowIndexVisible={rowIndexVisible}
             groupCollection={groupCollection}
@@ -595,17 +732,20 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             commentCountMap={commentCountMap}
             draggable={draggable}
             selectable={selectable}
+            isRowClickSelectionEnabled={isRowClickSelectionEnabled}
             collaborators={collaborators}
             searchCursor={searchCursor}
             searchHitIndex={searchHitIndex}
             rowControls={rowControls}
+            rowControlPaddingX={rowControlPaddingX}
             imageManager={imageManager}
             spriteManager={spriteManager}
             coordInstance={coordInstance}
             columnStatistics={columnStatistics}
             collapsedGroupIds={collapsedGroupIds}
-            columnHeaderVisible={columnHeaderVisible}
+            columnHeaderHeight={columnHeaderHeight}
             isMultiSelectionEnable={isMultiSelectionEnable}
+            disableEnterMoveDown={disableEnterMoveDown}
             activeCell={activeCell}
             mouseState={mouseState}
             scrollState={scrollState}
@@ -630,6 +770,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             onRowExpand={onRowExpand}
             onRowOrdered={onRowOrdered}
             onCellEdited={onCellEdited}
+            onCellDblClick={onCellDblClick}
             onContextMenu={onContextMenu}
             onColumnAppend={onColumnAppend}
             onColumnResize={onColumnResize}
@@ -639,10 +780,15 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             onColumnHeaderDblClick={onColumnHeaderDblClick}
             onColumnHeaderMenuClick={onColumnHeaderMenuClick}
             onCollapsedGroupChanged={onCollapsedGroupChanged}
+            onGroupHeaderContextMenu={onGroupHeaderContextMenu}
             onSelectionChanged={onSelectionChanged}
             onColumnFreeze={onColumnFreeze}
+            onColumnFreezeFailed={onColumnFreezeFailed}
             onItemHovered={onItemHovered}
             onItemClick={onItemClick}
+            onFillSelection={onFillSelection}
+            onRowControlClick={onRowControlClick}
+            onRowRangeSelected={onRowRangeSelected}
           />
         )}
       </div>
@@ -666,6 +812,21 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
         setScrollState={setScrollState}
         onScrollChanged={onScrollChanged}
         onVisibleRegionChanged={onVisibleRegionChanged}
+      />
+
+      <LoadingIndicator
+        cellLoadings={cellLoadings}
+        columnLoadings={columnLoadings}
+        coordInstance={coordInstance}
+        scrollState={scrollState}
+        real2RowIndex={real2RowIndex}
+      />
+
+      <ErrorIndicator
+        cellErrors={cellErrors}
+        coordInstance={coordInstance}
+        scrollState={scrollState}
+        real2RowIndex={real2RowIndex}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 /* eslint-disable jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */
 import { useDroppable } from '@dnd-kit/core';
-import type { FieldType } from '@teable/core';
+import { FieldType } from '@teable/core';
 import { DraggableHandle, Plus } from '@teable/icons';
 import { useView } from '@teable/sdk';
 import type { IFieldStatic } from '@teable/sdk/hooks';
@@ -27,27 +27,39 @@ interface IDragItemProps {
   field: IFieldInstance;
   disabled?: boolean;
   onClick?: () => void;
-  getFieldStatic: (type: FieldType, isLookup: boolean | undefined) => IFieldStatic;
+  getFieldStatic: (
+    type: FieldType,
+    config: {
+      isLookup: boolean | undefined;
+      isConditionalLookup?: boolean;
+      hasAiConfig: boolean | undefined;
+      deniedReadRecord?: boolean;
+    }
+  ) => IFieldStatic;
 }
 
 export const DragItem: FC<IDragItemProps> = (props) => {
   const { field, disabled, onClick, getFieldStatic } = props;
   const { t } = useTranslation(tableConfig.i18nNamespaces);
-  const { type, name, isLookup } = field;
-  const Icon = getFieldStatic(type, isLookup).Icon;
+  const { type, name, isLookup, aiConfig } = field;
+  const Icon = getFieldStatic(type, {
+    isLookup,
+    isConditionalLookup: field.isConditionalLookup,
+    hasAiConfig: Boolean(aiConfig),
+  }).Icon;
   const content = (
     <div
       className={cn(
-        'mb-[6px] flex items-center justify-between rounded-md bg-slate-100 p-2 dark:bg-slate-800',
-        disabled && 'cursor-not-allowed text-gray-400'
+        'mb-2 flex items-center h-8 justify-between rounded-md bg-muted border p-2 ',
+        disabled && 'cursor-not-allowed text-muted-foreground'
       )}
       onClick={() => !disabled && onClick?.()}
     >
       <div className="flex items-center overflow-hidden">
-        <Icon className="ml-1 mr-2 shrink-0" />
+        <Icon className="me-2 ms-1 size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm">{name}</span>
       </div>
-      {!disabled && <DraggableHandle className="ml-1 shrink-0" />}
+      {!disabled && <DraggableHandle className="ms-1 shrink-0" />}
     </div>
   );
 
@@ -96,8 +108,8 @@ export const FormSidebar: FC<IFormSidebarProps> = (props) => {
     const visibleFields: IFieldInstance[] = [];
     const unavailableFields: IFieldInstance[] = [];
     allFields.forEach((field) => {
-      const { isComputed, isLookup, id } = field;
-      if (isComputed || isLookup) {
+      const { isComputed, isLookup, id, type } = field;
+      if (isComputed || isLookup || type === FieldType.Button) {
         return unavailableFields.push(field);
       }
       if (view.columnMeta?.[id]?.visible) {
@@ -135,14 +147,13 @@ export const FormSidebar: FC<IFormSidebarProps> = (props) => {
   };
 
   return (
-    <div className="flex h-full w-64 shrink-0 flex-col border-r py-3">
+    <div className="flex h-full w-64 shrink-0 flex-col border-e pb-4 pt-3">
       <div className="mb-2 flex justify-between px-4">
-        <h2 className="text-lg">{t('table:form.fieldsManagement')}</h2>
+        <h2 className="text-base font-medium">{t('table:form.fieldsManagement')}</h2>
         <div>
           <Button
             variant={'ghost'}
             size={'xs'}
-            className="font-normal"
             disabled={!hiddenFields.length}
             onClick={() => onFieldsVisibleChange(hiddenFields, true)}
           >
@@ -151,7 +162,6 @@ export const FormSidebar: FC<IFormSidebarProps> = (props) => {
           <Button
             variant={'ghost'}
             size={'xs'}
-            className="font-normal"
             disabled={!visibleFields.length}
             onClick={() => onFieldsVisibleChange(visibleFields, false)}
           >
@@ -192,7 +202,7 @@ export const FormSidebar: FC<IFormSidebarProps> = (props) => {
                 />
               );
             })}
-            <div className="flex h-16 w-full items-center justify-center rounded border-2 border-dashed text-[13px] text-slate-400 dark:text-slate-600">
+            <div className="flex h-16 w-full items-center justify-center text-wrap rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground/80">
               {t('table:form.hideFieldTip')}
             </div>
           </div>
@@ -202,11 +212,12 @@ export const FormSidebar: FC<IFormSidebarProps> = (props) => {
       <div className="w-full px-4">
         <Button
           variant={'outline'}
+          size="sm"
           className="w-full"
           onClick={() => openSetting({ operator: FieldOperator.Add })}
         >
           <Plus fontSize={16} />
-          {t('table:field.editor.addField')}
+          {t('table:form.createField')}
         </Button>
       </div>
     </div>

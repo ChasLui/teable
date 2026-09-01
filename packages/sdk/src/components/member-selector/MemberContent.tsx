@@ -1,4 +1,4 @@
-import { Button, cn, DialogFooter, DialogHeader, DialogTitle, Separator } from '@teable/ui-lib';
+import { Button, cn, DialogFooter, DialogHeader, DialogTitle } from '@teable/ui-lib';
 import type { ReactNode } from 'react';
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { useTranslation } from '../../context/app/i18n';
@@ -89,7 +89,7 @@ export const MemberContent = forwardRef<IMemberContentRef, IMemberContentProps>(
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
           <div className="flex min-h-0 flex-col">
             <div className="h-8"></div>
-            <div className="min-h-0 flex-1 rounded-lg border">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border">
               <DepartmentList
                 departmentId={departmentId}
                 selectedMembers={selectedMembers}
@@ -109,7 +109,6 @@ export const MemberContent = forwardRef<IMemberContentRef, IMemberContentProps>(
             </div>
           </div>
         </div>
-        <Separator className="my-4" />
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             {t('common.cancel')}

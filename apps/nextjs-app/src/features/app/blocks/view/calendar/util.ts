@@ -1,7 +1,8 @@
 import type { IColorConfig } from '@teable/core';
 import { ColorConfigType, TimeFormatting } from '@teable/core';
-import { getColorPairs } from '@teable/sdk/components';
-import type { DateField, Record, SingleSelectField } from '@teable/sdk/model';
+import { getDisplayChoiceMap } from '@teable/sdk';
+import { getColorPairs, isMarkdownShowAs, stripMarkdown } from '@teable/sdk/components';
+import type { DateField, IFieldInstance, Record, SingleSelectField } from '@teable/sdk/model';
 import { set } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { DEFAULT_COLOR } from './components/CalendarConfig';
@@ -9,7 +10,8 @@ import { DEFAULT_COLOR } from './components/CalendarConfig';
 export const getColorByConfig = (
   record: Record,
   colorConfig: IColorConfig,
-  colorField?: SingleSelectField
+  colorField?: SingleSelectField,
+  theme?: string
 ) => {
   const { type: colorType, fieldId: colorFieldId, color } = colorConfig ?? {};
 
@@ -17,12 +19,19 @@ export const getColorByConfig = (
     if (colorFieldId && colorField) {
       const colorFieldValue = record.fields[colorFieldId];
       const { color, backgroundColor } =
-        colorField.displayChoiceMap[colorFieldValue as string] ?? {};
-      return color && backgroundColor ? { color, backgroundColor } : getColorPairs(DEFAULT_COLOR);
+        getDisplayChoiceMap(colorField.options.choices, theme)[colorFieldValue as string] ?? {};
+      return color && backgroundColor
+        ? { color, backgroundColor }
+        : getColorPairs(DEFAULT_COLOR, theme);
     }
-    return getColorPairs(DEFAULT_COLOR);
+    return getColorPairs(DEFAULT_COLOR, theme);
   }
-  return getColorPairs(color ?? DEFAULT_COLOR);
+  return getColorPairs(color ?? DEFAULT_COLOR, theme);
+};
+
+export const getPlainCellText = (field: IFieldInstance, cellValue: unknown): string => {
+  const str = field.cellValue2String(cellValue);
+  return isMarkdownShowAs(field.options) ? stripMarkdown(str) : str;
 };
 
 export const getEventTitle = (title: string, startDate: string | null, dateField: DateField) => {

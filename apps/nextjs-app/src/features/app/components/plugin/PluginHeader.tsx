@@ -1,5 +1,5 @@
 import { DragHandleDots2Icon } from '@radix-ui/react-icons';
-import { Edit, Maximize2, MoreHorizontal, X } from '@teable/icons';
+import { Copy, Edit, Maximize2, MoreHorizontal, X } from '@teable/icons';
 import {
   Button,
   cn,
@@ -23,6 +23,7 @@ export const PluginHeader = (props: {
   onClose: () => void;
   onDelete: () => void;
   onExpand: () => void;
+  onCopy: () => void;
   onNameChange: (name: string) => void;
 }) => {
   const {
@@ -34,6 +35,7 @@ export const PluginHeader = (props: {
     onClose,
     onDelete,
     onExpand,
+    onCopy,
     onNameChange,
   } = props;
   const [rename, setRename] = useState<string | null>(null);
@@ -43,10 +45,10 @@ export const PluginHeader = (props: {
 
   if (isExpanded) {
     return (
-      <div className="flex h-10 items-center border-b pl-4 pr-2">
+      <div className="flex h-10 items-center border-b pe-2 ps-4">
         <div className=" flex-1 truncate">{name}</div>
-        <Button variant={'ghost'} size={'xs'} onClick={onClose}>
-          <X className="size-4" />
+        <Button variant={'ghost'} size={'icon-xs'} onClick={onClose}>
+          <X className="size-4 shrink-0" />
         </Button>
       </div>
     );
@@ -90,23 +92,23 @@ export const PluginHeader = (props: {
         />
       </div>
       <div
-        className={cn('hidden gap-1 group-hover:flex', {
-          flex: menuOpen,
+        className={cn('flex gap-1 overflow-hidden min-w-0 group-hover:w-auto', {
+          'w-0': !menuOpen,
         })}
       >
         <Button
           title={t('common:actions.expand')}
           className="h-5 w-auto p-2"
-          size={'xs'}
+          size={'icon-xs'}
           variant={'ghost'}
           onClick={onExpand}
         >
-          <Maximize2 />
+          <Maximize2 className="size-4 shrink-0" />
         </Button>
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
-            <Button className="h-5 w-auto p-2" variant={'ghost'} size={'xs'}>
-              <MoreHorizontal />
+            <Button className="h-5 w-auto p-2" variant={'ghost'} size={'icon-xs'}>
+              <MoreHorizontal className="size-4 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="relative min-w-36 overflow-hidden">
@@ -117,13 +119,17 @@ export const PluginHeader = (props: {
                   setTimeout(() => renameRef.current?.focus(), 200);
                 }}
               >
-                <Edit className="mr-1.5" />
+                <Edit className="me-1.5" />
                 {t('common:actions.rename')}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={onExpand}>
-              <Maximize2 className="mr-1.5" />
+              <Maximize2 className="me-1.5" />
               {t('common:actions.expand')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onCopy}>
+              <Copy className="me-1.5" />
+              {t('common:actions.duplicate')}
             </DropdownMenuItem>
             {canManage && (
               <>

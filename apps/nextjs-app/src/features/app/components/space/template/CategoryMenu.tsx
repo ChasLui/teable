@@ -1,52 +1,70 @@
 import { useQuery } from '@tanstack/react-query';
 import { getTemplateCategoryList } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
+import { useIsMobile } from '@teable/sdk/hooks';
+import { cn } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { CategoryMenuItem } from './CategoryMenuItem';
 
-const CategoryGroupLabel = ({ label }: { label: string }) => {
-  return <span className="text-sm font-medium text-muted-foreground">{label}</span>;
-};
-
 interface ICategoryMenuProps {
-  currentCategoryId: string;
-  onCategoryChange: (category: string) => void;
+  currentCategoryId: string | null;
+  onCategoryChange: (category: string | null) => void;
+  className?: string;
+  categoryHeaderRender?: () => React.ReactNode;
+  isFeatured: boolean | undefined;
+  onFeaturedChange: (isFeatured: boolean | undefined) => void;
+  disabledFeaturedToggle: boolean;
 }
 
 export const CategoryMenu = (props: ICategoryMenuProps) => {
-  const { currentCategoryId, onCategoryChange } = props;
+  const { currentCategoryId, onCategoryChange, className } = props;
   const { t } = useTranslation('common');
-  const { data: categoryList } = useQuery({
-    queryKey: ReactQueryKeys.templateCategoryList(),
+  const { data: categoryListFromServer } = useQuery({
+    queryKey: ReactQueryKeys.publishedTemplateCategoryList(),
     queryFn: () => getTemplateCategoryList().then((data) => data.data),
   });
 
+  const isMobile = useIsMobile();
+
+  const categoryList = useMemo(() => {
+    return [
+      {
+        id: null,
+        name: t('settings.templateAdmin.category.menu.recommended'),
+        order: -Infinity,
+      },
+      // Widen type so concat is valid (recommended + categories)
+      ...(categoryListFromServer ?? []),
+    ];
+  }, [categoryListFromServer, t]);
+
   return (
-    <div className="flex max-w-48 flex-1 flex-col gap-3 overflow-hidden p-2">
-      <div className="flex flex-col gap-1">
-        <CategoryGroupLabel label={t('settings.templateAdmin.category.menu.getStarted')} />
-        <CategoryMenuItem
-          key={'all'}
-          id={'all'}
-          category={t('settings.templateAdmin.category.menu.all')}
-          currentCategoryId={currentCategoryId}
-          onClickHandler={() => onCategoryChange('all')}
-        />
-      </div>
-
+    <div
+      className={cn('flex flex-col gap-6 overflow-hidden px-2 pt-4 shrink-0 w-64', className, {
+        'flex-row w-full': isMobile,
+      })}
+    >
       {categoryList && categoryList.length > 0 && (
-        <div className="flex flex-1 flex-col gap-1 overflow-hidden">
-          <CategoryGroupLabel label={t('settings.templateAdmin.category.menu.browseByCategory')} />
-
-          <div className="flex flex-1 flex-col gap-y-1 overflow-auto">
+        <div
+          className={cn('flex flex-1 flex-col overflow-hidden', {
+            'flex-row overflow-x-auto': isMobile,
+          })}
+        >
+          <div
+            className={cn('flex flex-1 flex-col overflow-auto gap-0.5', {
+              'flex-row gap-x-0.5': isMobile,
+            })}
+          >
             {categoryList?.map(({ name, id }) => (
               <CategoryMenuItem
                 key={id}
                 category={name}
                 id={id}
                 currentCategoryId={currentCategoryId}
-                onClickHandler={() => onCategoryChange(id)}
+                onClickHandler={() => {
+                  onCategoryChange(id);
+                }}
               />
             ))}
           </div>

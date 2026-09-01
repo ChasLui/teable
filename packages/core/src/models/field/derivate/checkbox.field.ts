@@ -1,12 +1,9 @@
 import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
-
-export const checkboxFieldOptionsSchema = z
-  .object({ defaultValue: z.boolean().optional() })
-  .strict();
-
-export type ICheckboxFieldOptions = z.infer<typeof checkboxFieldOptionsSchema>;
+import type { IFieldVisitor } from '../field-visitor.interface';
+import type { ICheckboxFieldOptions } from './checkbox-option.schema';
+import { checkboxFieldOptionsSchema } from './checkbox-option.schema';
 
 export const booleanCellValueSchema = z.boolean();
 
@@ -16,6 +13,8 @@ export class CheckboxFieldCore extends FieldCore {
   type!: FieldType.Checkbox;
 
   options!: ICheckboxFieldOptions;
+
+  meta?: undefined;
 
   cellValueType!: CellValueType.Boolean;
 
@@ -49,6 +48,16 @@ export class CheckboxFieldCore extends FieldCore {
       return null;
     }
 
+    if (typeof value === 'string') {
+      const lowercase = value.toLowerCase();
+      if (lowercase === 'true') {
+        return true;
+      }
+      if (lowercase === 'false') {
+        return null;
+      }
+    }
+
     return value ? true : null;
   }
 
@@ -70,5 +79,9 @@ export class CheckboxFieldCore extends FieldCore {
       .nullable()
       .transform((val) => (val === false ? null : val))
       .safeParse(value);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitCheckboxField(this);
   }
 }

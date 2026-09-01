@@ -11,7 +11,18 @@ export const AI_GENERATE_STREAM = '/api/{baseId}/ai/generate-stream';
 
 export const aiGenerateRoSchema = z.object({
   prompt: z.string(),
-  task: z.nativeEnum(Task).optional(),
+  task: z.enum(Task).optional().meta({
+    description: 'Quick model selection via predefined task type',
+    example: Task.Coding,
+  }),
+  modelKey: z.string().optional().meta({
+    description: 'Specify an exact model configuration to use',
+    example: 'openai@gpt-4o@custom-name',
+  }),
+  reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).optional().meta({
+    description:
+      "Reasoning effort forwarded to the provider. 'none' suppresses hidden thinking tokens entirely — for latency-critical structured output, thinking time is time-to-first-token.",
+  }),
 });
 
 export type IAiGenerateRo = z.infer<typeof aiGenerateRoSchema>;

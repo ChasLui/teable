@@ -6,8 +6,10 @@ import type { PrismaService } from '@teable/db-main-prisma';
 import { plainToInstance } from 'class-transformer';
 import { vi } from 'vitest';
 import { mockDeep, mockReset } from 'vitest-mock-extended';
+import { getError } from '../../../test/utils/get-error';
 import type { AttachmentsStorageService } from '../attachments/attachments-storage.service';
 import type { CollaboratorService } from '../collaborator/collaborator.service';
+import type { DataLoaderService } from '../data-loader/data-loader.service';
 import type { FieldConvertingService } from '../field/field-calculate/field-converting.service';
 import type { IFieldInstance } from '../field/model/factory';
 import type { SingleSelectFieldDto } from '../field/model/field-dto/single-select-field.dto';
@@ -28,6 +30,7 @@ describe('TypeCastAndValidate', () => {
   const recordService = mockDeep<RecordService>();
   const attachmentsStorageService = mockDeep<AttachmentsStorageService>();
   const collaboratorService = mockDeep<CollaboratorService>();
+  const dataLoaderService = mockDeep<DataLoaderService>();
 
   const services = {
     prismaService,
@@ -35,6 +38,7 @@ describe('TypeCastAndValidate', () => {
     recordService,
     attachmentsStorageService,
     collaboratorService,
+    dataLoaderService,
   };
   const tableId = 'tableId';
 
@@ -43,6 +47,7 @@ describe('TypeCastAndValidate', () => {
     mockReset(prismaService);
     mockReset(recordService);
     mockReset(collaboratorService);
+    mockReset(dataLoaderService);
   });
 
   describe('typecastCellValuesWithField', () => {
@@ -161,6 +166,23 @@ describe('TypeCastAndValidate', () => {
     });
   });
 
+  it('should bypass notNull for computed fields', async () => {
+    const field = mockDeep<IFieldInstance>({
+      type: FieldType.Formula,
+      isComputed: true,
+      notNull: true,
+      validateCellValue: vi.fn().mockReturnValue({ success: true, data: null }),
+      validateCellValueWithNotNull: vi.fn().mockReturnValue({ success: true, data: null }),
+    });
+    const typeCastAndValidate = new TypeCastAndValidate({ services, field, tableId });
+    const result = (typeCastAndValidate as any).mapFieldsCellValuesWithValidate(
+      [null],
+      (v: any) => v
+    );
+    expect(result[0]).toBeNull();
+    expect(field.validateCellValueWithNotNull).toHaveBeenCalled();
+  });
+
   describe('mapFieldsCellValuesWithValidate', () => {
     const field = mockDeep<IFieldInstance>({ id: 'fldxxxx' });
     const typeCastAndValidate = new TypeCastAndValidate({
@@ -173,12 +195,10 @@ describe('TypeCastAndValidate', () => {
       const cellValues = [1];
       const callback = vi.fn(() => 'value');
 
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore-next-line
-      field.validateCellValue.mockReturnValue({
+      field.validateCellValueWithNotNull = vi.fn().mockReturnValue({
         success: false,
         error: 'error',
-      });
+      }) as any;
 
       const result = typeCastAndValidate['mapFieldsCellValuesWithValidate'](cellValues, callback);
 
@@ -186,7 +206,7 @@ describe('TypeCastAndValidate', () => {
       expect(callback).toBeCalledWith(1);
     });
 
-    it('should throw error when validate fails', () => {
+    it('should throw error when validate fails', async () => {
       const cellValues = [1];
 
       const typeCastAndValidate = new TypeCastAndValidate({
@@ -195,29 +215,31 @@ describe('TypeCastAndValidate', () => {
         tableId,
       });
 
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore-next-line
-      field.validateCellValue.mockReturnValue({
+      field.validateCellValueWithNotNull = vi.fn().mockReturnValue({
         success: false,
         error: 'error',
-      });
+      }) as any;
 
-      expect(() => {
-        typeCastAndValidate['mapFieldsCellValuesWithValidate'](cellValues, vi.fn());
-      }).toThrow('Bad Request');
+      const error = await getError(async () =>
+        typeCastAndValidate['mapFieldsCellValuesWithValidate'](cellValues, vi.fn())
+      );
+      expect(error).toBeDefined();
+      expect(error?.status).toBe(400);
     });
 
     it('should return null if typecast is false', () => {
-      const field = mockDeep<IFieldInstance>();
+      const field = mockDeep<IFieldInstance>({
+        validateCellValueWithNotNull: vi.fn().mockReturnValue({ success: true, data: null }),
+      }) as any;
       const typeCastAndValidate = new TypeCastAndValidate({
         services,
         field,
         tableId,
       });
 
-      field.validateCellValue.mockReturnValue({
+      field.validateCellValue = vi.fn().mockReturnValue({
         success: true,
-      } as any);
+      }) as any;
 
       const cellValues = [1];
 
@@ -230,15 +252,11 @@ describe('TypeCastAndValidate', () => {
     });
 
     it('should not throw error if no field value', () => {
-      const cellValues = [1];
-
-      field.validateCellValue.mockReturnValue({
-        success: true,
-      } as any);
+      const cellValues = [undefined];
 
       const result = typeCastAndValidate['mapFieldsCellValuesWithValidate'](cellValues, vi.fn());
 
-      expect(result).toEqual([null]);
+      expect(result).toEqual([undefined]);
     });
   });
 
@@ -334,6 +352,40 @@ describe('TypeCastAndValidate', () => {
       expect(typeCastAndValidate['mapFieldsCellValuesWithValidate']).toBeCalled();
       expect(typeCastAndValidate['createOptionsIfNotExists']).toBeCalledWith(['value']);
       expect(result).toEqual('value');
+    });
+
+    it('preserves omitted values when preventAutoNewOptions is enabled', async () => {
+      const field = mockDeep<SingleSelectFieldDto>({
+        id: 'fldxxxx',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [{ id: '1', name: 'Open', color: Colors.Blue }],
+          preventAutoNewOptions: true,
+        },
+      });
+      const typeCastAndValidate = new TypeCastAndValidate({
+        services,
+        field,
+        tableId,
+        typecast: true,
+      });
+      (typeCastAndValidate as any).cache.choicesMap = {
+        Open: { id: '1', name: 'Open', color: Colors.Blue },
+      };
+
+      vi.spyOn(typeCastAndValidate as any, 'mapFieldsCellValuesWithValidate').mockReturnValue([
+        undefined,
+        'Open',
+        'Missing',
+      ]);
+
+      const result = await typeCastAndValidate['castToSingleSelect']([
+        undefined,
+        'Open',
+        'Missing',
+      ]);
+
+      expect(result).toEqual([undefined, 'Open', null]);
     });
   });
 

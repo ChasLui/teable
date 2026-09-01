@@ -81,7 +81,7 @@ export function DepartmentList({
       departmentId: currentDepartment,
       search: debouncedSearch,
     }),
-    queryFn: ({ pageParam = 0, queryKey: [_, ro] }) =>
+    queryFn: ({ pageParam, queryKey: [_, ro] }) =>
       getDepartmentUsers({
         ...ro,
         departmentId: ro?.search ? undefined : ro?.departmentId,
@@ -91,6 +91,7 @@ export function DepartmentList({
       }).then((res) => res.data),
     staleTime: 1000,
     refetchOnWindowFocus: false,
+    initialPageParam: 0,
     getNextPageParam: (lastPage, pages) => {
       const allUsers = pages.flatMap((page) => page.users);
       return allUsers.length >= lastPage.total ? undefined : pages.length;
@@ -193,11 +194,19 @@ export function DepartmentList({
                 <DepartmentItem
                   key={item.id}
                   name={item.name}
+                  pathName={debouncedSearch ? item.pathName : undefined}
                   checked={isSelected(item.id)}
-                  onClick={() => handleDepartmentClick(item)}
+                  // Search results are a flat select-only list: drilling in is a
+                  // browse-mode affordance, and searched departments may not be
+                  // browsable at all (e.g. unrelated ones under RelatedSearchAll)
+                  onClick={debouncedSearch ? undefined : () => handleDepartmentClick(item)}
                   onCheckedChange={() => onSelect(item)}
                   showCheckbox={!disabledDepartment}
-                  suffix={<ChevronRight className="size-4 text-muted-foreground" />}
+                  suffix={
+                    debouncedSearch ? undefined : (
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    )
+                  }
                 />
               ))}
 

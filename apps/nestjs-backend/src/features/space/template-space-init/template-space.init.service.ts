@@ -2,6 +2,8 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { IdPrefix } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 
+export const TEMPLATE_SPACE_ID = `${IdPrefix.Space}DefaultTempSpcId`;
+
 @Injectable()
 export class TemplateSpaceInitService implements OnModuleInit {
   private logger = new Logger(TemplateSpaceInitService.name);
@@ -11,21 +13,16 @@ export class TemplateSpaceInitService implements OnModuleInit {
   async onModuleInit() {
     const prisma = this.prismaService.txClient();
 
-    const templateSpace = await prisma.space.findFirst({
+    const initTemplateSpaceId = TEMPLATE_SPACE_ID;
+
+    await prisma.space.upsert({
       where: {
+        id: initTemplateSpaceId,
+      },
+      update: {
         isTemplate: true,
       },
-    });
-
-    if (templateSpace) {
-      this.logger.log('Template space already exists');
-      return;
-    }
-
-    const initTemplateSpaceId = `${IdPrefix.Space}DefaultTempSpcId`;
-
-    await prisma.space.create({
-      data: {
+      create: {
         id: initTemplateSpaceId,
         name: 'Template Space',
         isTemplate: true,
@@ -33,6 +30,6 @@ export class TemplateSpaceInitService implements OnModuleInit {
       },
     });
 
-    this.logger.log('Template space created');
+    this.logger.log('Template space ensured');
   }
 }

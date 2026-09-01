@@ -8,7 +8,7 @@ export const BrandFooter = () => {
 
   return (
     <div className="flex w-full items-center justify-center">
-      <span className="h-px w-16 bg-slate-200 dark:bg-slate-600" />
+      <span className="h-px w-16 bg-border" />
       <div className="mx-4 flex items-center gap-2 text-xs text-muted-foreground">
         {brandName.toLowerCase() === 'teable' ? (
           <Trans
@@ -17,23 +17,23 @@ export const BrandFooter = () => {
             components={[
               <Link
                 key={'brandFooter'}
-                href="/"
+                href="https://teable.ai"
                 target="_blank"
                 className="flex items-center text-sm text-black dark:text-white"
               >
                 <TeableLogo className="text-xl" />
-                <span className="ml-1 font-semibold">{brandName}</span>
+                <span className="ms-1 font-semibold">{brandName}</span>
               </Link>,
             ]}
           />
         ) : (
           <Link href="/" target="_blank" className="flex items-center">
             <TeableLogo className="text-xl" />
-            <span className="ml-1 font-semibold">{brandName}</span>
+            <span className="ms-1 font-semibold">{brandName}</span>
           </Link>
         )}
       </div>
-      <span className="h-px w-16 bg-slate-200 dark:bg-slate-600" />
+      <span className="h-px w-16 bg-border" />
     </div>
   );
 };

@@ -1,5 +1,6 @@
+/* eslint-disable regexp/no-unused-capturing-group */
 /* eslint-disable sonarjs/no-duplicate-string */
-import { assertNever, CellValueType } from '@teable/core';
+import { assertNever, CellValueType, FieldType } from '@teable/core';
 import type { IFieldInstance } from '../../features/field/model/factory';
 
 import { IndexBuilderAbstract } from '../index-query/index-abstract-builder';
@@ -8,11 +9,35 @@ interface IPgIndex {
   schemaname: string;
   tablename: string;
   indexname: string;
-  tablespace: string;
   indexdef: string;
 }
 
-const unSupportCellValueType = [CellValueType.DateTime, CellValueType.Boolean];
+const unSupportCellValueType = [CellValueType.Boolean];
+
+/**
+ * New `idx_trgm_*` indexes only cover singleLineText, longText, and string
+ * formulas. Keep in sync with `isAllowedSubstringSearchIndexProjection` in
+ * v2 SearchFieldTextShape.ts. Lookups reuse the inner `type`.
+ */
+const allowsSubstringTrgmIndex = (field: IFieldInstance): boolean => {
+  if (field.isMultipleCellValue) {
+    return false;
+  }
+  if (field.type === FieldType.Formula) {
+    return field.cellValueType === CellValueType.String && !field.isStructuredCellValue;
+  }
+  return field.type === FieldType.SingleLineText || field.type === FieldType.LongText;
+};
+
+type ISearchIndexSpec =
+  | {
+      kind: 'btree';
+      expression: string;
+    }
+  | {
+      kind: 'trgm';
+      expression: string;
+    };
 
 export class FieldFormatter {
   static getSearchableExpression(field: IFieldInstance, isArray = false): string | null {
@@ -36,9 +61,14 @@ export class FieldFormatter {
         }
         case CellValueType.String: {
           if (isStructuredCellValue) {
-            return `value->>'title'::text`;
+            return `"${dbFieldName}"::jsonb #>> '{title}'`;
           }
-          return 'value';
+          if (field.type === FieldType.LongText) {
+            // chr(13) is carriage return, chr(10) is line feed, chr(9) is tab
+            return `REPLACE(REPLACE(REPLACE(value, CHR(13), ' '::text), CHR(10), ' '::text), CHR(9), ' '::text)`;
+          } else {
+            return `value`;
+          }
         }
         default:
           assertNever(cellValueType);
@@ -60,8 +90,31 @@ export class FieldFormatter {
   }
 
   // expression for generating index
-  static getIndexExpression(field: IFieldInstance): string | null {
-    return this.getSearchableExpression(field, field.isMultipleCellValue);
+  static getIndexSpec(field: IFieldInstance): ISearchIndexSpec | null {
+    if (field.cellValueType === CellValueType.DateTime) {
+      if (field.isMultipleCellValue) {
+        return null;
+      }
+
+      return {
+        kind: 'btree',
+        expression: `"${field.dbFieldName}"`,
+      };
+    }
+
+    if (!allowsSubstringTrgmIndex(field)) {
+      return null;
+    }
+
+    const expression = this.getSearchableExpression(field, field.isMultipleCellValue);
+    if (!expression) {
+      return null;
+    }
+
+    return {
+      kind: 'trgm',
+      expression,
+    };
   }
 }
 
@@ -102,12 +155,16 @@ export class IndexBuilderPostgres extends IndexBuilderAbstract {
   createSingleIndexSql(dbTableName: string, field: IFieldInstance): string | null {
     const [schema, table] = dbTableName.split('.');
     const indexName = this.getIndexName(table, field);
-    const expression = FieldFormatter.getIndexExpression(field);
-    if (expression === null) {
+    const indexSpec = FieldFormatter.getIndexSpec(field);
+    if (indexSpec === null) {
       return null;
     }
 
-    return `CREATE INDEX IF NOT EXISTS "${indexName}" ON "${schema}"."${table}" USING gin ((${expression}) gin_trgm_ops)`;
+    if (indexSpec.kind === 'btree') {
+      return `CREATE INDEX IF NOT EXISTS "${indexName}" ON "${schema}"."${table}" USING btree (${indexSpec.expression})`;
+    }
+
+    return `CREATE INDEX IF NOT EXISTS "${indexName}" ON "${schema}"."${table}" USING gin ((${indexSpec.expression}) gin_trgm_ops)`;
   }
 
   getDropIndexSql(dbTableName: string): string {
@@ -135,12 +192,15 @@ export class IndexBuilderPostgres extends IndexBuilderAbstract {
     const fieldSql = searchFields
       .filter(({ cellValueType }) => !unSupportCellValueType.includes(cellValueType))
       .map((field) => {
-        const expression = FieldFormatter.getIndexExpression(field);
-        return expression ? this.createSingleIndexSql(dbTableName, field) : null;
+        return this.createSingleIndexSql(dbTableName, field);
       })
       .filter((sql): sql is string => sql !== null);
 
-    fieldSql.unshift(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
+    // Install shared extensions outside a space's internal schema. Scoped BYODB
+    // transactions put that schema first on search_path, so omitting WITH SCHEMA
+    // would make the first space own pg_trgm and hide its operator classes from
+    // every other space using the same database.
+    fieldSql.unshift(`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;`);
     return fieldSql;
   }
 
@@ -180,21 +240,24 @@ export class IndexBuilderPostgres extends IndexBuilderAbstract {
   }
 
   getIndexInfoSql(dbTableName: string): string {
-    const [, table] = dbTableName.split('.');
+    const [schema, table] = dbTableName.split('.');
     const searchFactor = this.getSearchFactor();
+    // Cast pg_catalog `name` columns to text: scoped data-db clients run raw
+    // queries through @prisma/adapter-pg, which cannot deserialize `name`.
     return `
-    SELECT * FROM pg_indexes 
-WHERE tablename = '${table}'
-AND indexname like '${searchFactor}%'`;
+      SELECT schemaname::text, tablename::text, indexname::text, indexdef
+      FROM pg_indexes
+      WHERE schemaname = '${schema}'
+      AND tablename = '${table}'
+      AND indexname like '${searchFactor}%'`;
   }
 
   getAbnormalIndex(dbTableName: string, fields: IFieldInstance[], existingIndex: IPgIndex[]) {
     const [, table] = dbTableName.split('.');
     const expectExistIndex = fields
       .filter(({ cellValueType }) => !unSupportCellValueType.includes(cellValueType))
-      .map((field) => {
-        return this.getIndexName(table, field);
-      });
+      .filter((field) => this.createSingleIndexSql(dbTableName, field) !== null)
+      .map((field) => this.getIndexName(table, field));
 
     // 1: find the lack or redundant index
     const lackingIndex = expectExistIndex.filter(
@@ -213,22 +276,31 @@ AND indexname like '${searchFactor}%'`;
     // 2: find the abnormal index definition
     const expectIndexDef = fields
       .filter(({ cellValueType }) => !unSupportCellValueType.includes(cellValueType))
-      .map((f) => {
-        return {
-          indexName: this.getIndexName(table, f),
-          indexDef: this.createSingleIndexSql(dbTableName, f) as string,
-        };
+      .flatMap((f) => {
+        const indexDef = this.createSingleIndexSql(dbTableName, f);
+        return indexDef
+          ? [
+              {
+                indexName: this.getIndexName(table, f),
+                indexDef,
+              },
+            ]
+          : [];
       });
 
     return expectIndexDef
       .filter(({ indexDef }) => {
         const existIndex = existingIndex.map((idx) =>
-          idx.indexdef.toLowerCase().replace(/[()\s"']/g, '')
+          idx.indexdef
+            .toLowerCase()
+            .replace(/[()\s"']/g, '')
+            .replace(/::(jsonb|text\[\]|text)/g, '')
         );
         return !existIndex.includes(
           indexDef
             .toLowerCase()
             .replace(/[()\s"']/g, '')
+            .replace(/::(jsonb|text\[\]|text)/g, '')
             .replace(/ifnotexists/g, '')
         );
       })

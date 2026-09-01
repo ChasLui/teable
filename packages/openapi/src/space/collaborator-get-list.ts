@@ -13,7 +13,10 @@ export const listSpaceCollaboratorRoSchema = z.object({
   skip: z.coerce.number().optional(),
   take: z.coerce.number().optional(),
   search: z.string().optional(),
-  type: z.nativeEnum(PrincipalType).optional(),
+  type: z.enum(PrincipalType).optional(),
+  orderBy: z.enum(['desc', 'asc']).optional(),
+  // Restrict rows to one principal, e.g. to expand a grouped collaborator's permissions
+  principalId: z.string().optional(),
 });
 
 export type ListSpaceCollaboratorRo = z.infer<typeof listSpaceCollaboratorRoSchema>;
@@ -22,6 +25,7 @@ export type ItemSpaceCollaboratorVo = z.infer<typeof collaboratorItem>;
 
 export const listSpaceCollaboratorVoSchema = z.object({
   collaborators: z.array(collaboratorItem),
+  uniqTotal: z.number(),
   total: z.number(),
 });
 

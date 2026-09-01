@@ -1,12 +1,18 @@
 /* eslint-disable jsx-a11y/no-static-element-interactions */
 /* eslint-disable jsx-a11y/click-events-have-key-events */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { PluginPosition, removePluginPanelPlugin, renamePluginPanelPlugin } from '@teable/openapi';
+import {
+  duplicatePluginPanelInstalledPlugin,
+  PluginPosition,
+  removePluginPanelPlugin,
+  renamePluginPanelPlugin,
+} from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { useBaseId, useTablePermission } from '@teable/sdk/hooks';
 import { cn } from '@teable/ui-lib/shadcn';
 import { useRouter } from 'next/router';
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { PluginContent } from '@/features/app/components/plugin/PluginContent';
 import { PluginHeader } from '@/features/app/components/plugin/PluginHeader';
 import { useIsExpandPlugin } from '@/features/app/dashboard/hooks/useIsExpandPlugin';
@@ -29,11 +35,14 @@ export const PluginItem = (props: {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isExpandPlugin = useIsExpandPlugin();
+  const { t } = useTranslation(['common']);
 
   const { mutate: removePluginMutate } = useMutation({
     mutationFn: () => removePluginPanelPlugin(tableId, pluginPanelId, pluginInstallId),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.getPluginPanel(tableId, pluginPanelId));
+      queryClient.invalidateQueries({
+        queryKey: ReactQueryKeys.getPluginPanel(tableId, pluginPanelId),
+      });
     },
   });
 
@@ -41,9 +50,25 @@ export const PluginItem = (props: {
     mutationFn: (name: string) =>
       renamePluginPanelPlugin(tableId, pluginPanelId, pluginInstallId, name),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.getPluginPanel(tableId, pluginPanelId));
+      queryClient.invalidateQueries({
+        queryKey: ReactQueryKeys.getPluginPanel(tableId, pluginPanelId),
+      });
     },
   });
+
+  const { mutate: duplicatePluginMutate } = useMutation({
+    mutationFn: (name: string) =>
+      duplicatePluginPanelInstalledPlugin(tableId, pluginPanelId, pluginInstallId, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ReactQueryKeys.getPluginPanel(tableId, pluginPanelId),
+      });
+    },
+  });
+
+  const onCopy = useCallback(async () => {
+    await duplicatePluginMutate(`${pluginName} ${t('common:noun.copy')}`);
+  }, [duplicatePluginMutate, pluginName, t]);
 
   const onExpand = useCallback(() => {
     const query = { ...router.query, expandPluginId: pluginInstallId };
@@ -75,7 +100,7 @@ export const PluginItem = (props: {
   return (
     <div
       className={cn('h-full', {
-        'fixed top-0 left-0 right-0 bottom-0 bg-black/20 flex items-center justify-center z-[51]':
+        'fixed top-0 start-0 end-0 bottom-0 bg-black/20 flex items-center justify-center z-10':
           isExpanded,
       })}
       onClick={onClose}
@@ -100,6 +125,7 @@ export const PluginItem = (props: {
           canManage={canManage}
           draggableHandleClassName="plugin-panel-draggable-handle"
           dragging={isDragging}
+          onCopy={onCopy}
         />
         <PluginContent
           baseId={baseId}

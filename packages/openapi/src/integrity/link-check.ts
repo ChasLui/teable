@@ -14,12 +14,21 @@ export enum IntegrityIssueType {
   MissingRecordReference = 'MissingRecordReference',
   InvalidLinkReference = 'InvalidLinkReference',
   ForeignKeyHostTableNotFound = 'ForeignKeyHostTableNotFound',
+  ReferenceFieldNotFound = 'ReferenceFieldNotFound',
+  UniqueIndexNotFound = 'UniqueIndexNotFound',
+  EmptyString = 'EmptyString',
+  InvalidFilterOperator = 'InvalidFilterOperator',
+  InvalidPrimaryLookup = 'InvalidPrimaryLookup',
+  InvalidPrimaryType = 'InvalidPrimaryType',
+  MissingPrimary = 'MissingPrimary',
 }
 
 // Define the schema for a single issue
 export const integrityIssueSchema = z.object({
-  type: z.nativeEnum(IntegrityIssueType),
+  type: z.enum(IntegrityIssueType),
   message: z.string(),
+  fieldId: z.string(),
+  tableId: z.string().optional(),
 });
 
 // Define the schema for a link field check item
@@ -27,12 +36,10 @@ export const linkFieldCheckItemSchema = z.object({
   baseId: z
     .string()
     .optional()
-    .openapi({ description: 'The base id of the link field with is cross-base' }),
+    .meta({ description: 'The base id of the link field with is cross-base' }),
   baseName: z.string().optional(),
-  fieldId: z.string(),
-  fieldName: z.string(),
-  tableId: z.string(),
-  tableName: z.string(),
+  tableId: z.string().optional(),
+  tableName: z.string().optional(),
   issues: z.array(integrityIssueSchema),
 });
 
@@ -54,6 +61,9 @@ export const IntegrityCheckRoute: RouteConfig = registerRoute({
     params: z.object({
       baseId: z.string(),
     }),
+    query: z.object({
+      tableId: z.string(),
+    }),
   },
   responses: {
     200: {
@@ -68,10 +78,15 @@ export const IntegrityCheckRoute: RouteConfig = registerRoute({
   tags: ['integrity'],
 });
 
-export const checkBaseIntegrity = async (baseId: string) => {
+export const checkBaseIntegrity = async (baseId: string, tableId: string) => {
   return axios.get<IIntegrityCheckVo>(
     urlBuilder(CHECK_BASE_INTEGRITY, {
       baseId,
-    })
+    }),
+    {
+      params: {
+        tableId,
+      },
+    }
   );
 };

@@ -1,33 +1,83 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { generateRecordTrashId } from '@teable/core';
-import { PrismaService } from '@teable/db-main-prisma';
 import { ResourceType } from '@teable/openapi';
-import { Knex } from 'knex';
-import { InjectModel } from 'nest-knexjs';
 import { IThresholdConfig, ThresholdConfig } from '../../../configs/threshold.config';
 import { Events } from '../../../event-emitter/events';
+import { DataDbClientManager } from '../../../global/data-db-client-manager.service';
 import { IDeleteFieldsPayload } from '../../undo-redo/operations/delete-fields.operation';
 import { IDeleteRecordsPayload } from '../../undo-redo/operations/delete-records.operation';
 import { IDeleteViewPayload } from '../../undo-redo/operations/delete-view.operation';
+import { buildRecordTrashRows } from '../record-trash-row';
+
+type ITableTrashDataPrisma = {
+  tableTrash: {
+    create(args: unknown): PromiseLike<unknown>;
+  };
+  recordTrash: {
+    createMany(args: unknown): PromiseLike<unknown>;
+  };
+};
+
+type IScopedTableTrashDataPrisma = ITableTrashDataPrisma & {
+  txClient?: () => ITableTrashDataPrisma;
+  $tx?: <T>(
+    fn: (prisma: ITableTrashDataPrisma) => Promise<T>,
+    options?: { timeout?: number }
+  ) => Promise<T>;
+  $transaction?: <T>(
+    fn: (prisma: ITableTrashDataPrisma) => Promise<T>,
+    options?: { timeout?: number }
+  ) => Promise<T>;
+};
 
 @Injectable()
 export class TableTrashListener {
   constructor(
-    private readonly prismaService: PrismaService,
-    @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
+    private readonly dataDbClientManager: DataDbClientManager,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
   ) {}
 
-  @OnEvent(Events.OPERATION_RECORDS_DELETE, { async: true })
+  private getDataPrismaExecutor(prisma: IScopedTableTrashDataPrisma): ITableTrashDataPrisma {
+    return prisma.txClient?.() ?? prisma;
+  }
+
+  private async dataPrismaForTable(tableId: string): Promise<IScopedTableTrashDataPrisma> {
+    return (await this.dataDbClientManager.dataPrismaForTable(tableId, {
+      useTransaction: true,
+    })) as IScopedTableTrashDataPrisma;
+  }
+
+  private async dataPrismaTransactionForTable<T>(
+    tableId: string,
+    fn: (prisma: ITableTrashDataPrisma) => Promise<T>,
+    options?: { timeout?: number }
+  ): Promise<T> {
+    const prisma = await this.dataPrismaForTable(tableId);
+
+    if (prisma.$tx) {
+      return await prisma.$tx(fn, options);
+    }
+
+    if (prisma.$transaction) {
+      return await prisma.$transaction(fn, options);
+    }
+
+    return await fn(this.getDataPrismaExecutor(prisma));
+  }
+
+  @OnEvent(Events.OPERATION_RECORDS_DELETE)
   async recordDeleteListener(payload: IDeleteRecordsPayload) {
-    const { operationId, userId, tableId, records } = payload;
+    const { operationId, userId, tableId, records, removalReason } = payload;
 
     if (!operationId) return;
+    // Archive removals persist their own snapshot (with reason='archived') before deleting.
+    if (removalReason === 'archived') return;
 
     const recordIds = records.map((record) => record.id);
+    const createdTime = new Date();
 
-    await this.prismaService.$tx(
+    await this.dataPrismaTransactionForTable(
+      tableId,
       async (prisma) => {
         await prisma.tableTrash.create({
           data: {
@@ -36,22 +86,16 @@ export class TableTrashListener {
             createdBy: userId,
             resourceType: ResourceType.Record,
             snapshot: JSON.stringify(recordIds),
+            createdTime,
           },
         });
 
         const batchSize = 5000;
         for (let i = 0; i < records.length; i += batchSize) {
           const batch = records.slice(i, i + batchSize);
-          const recordTrashData = batch.map((record) => ({
-            id: generateRecordTrashId(),
-            table_id: tableId,
-            record_id: record.id,
-            snapshot: JSON.stringify(record),
-            created_by: userId,
-          }));
-
-          const query = this.knex.insert(recordTrashData).into('record_trash').toQuery();
-          await prisma.$executeRawUnsafe(query);
+          await prisma.recordTrash.createMany({
+            data: buildRecordTrashRows(batch, { tableId, userId, createdTime, operationId }),
+          });
         }
       },
       {
@@ -66,7 +110,9 @@ export class TableTrashListener {
 
     if (!operationId) return;
 
-    await this.prismaService.tableTrash.create({
+    const dataPrisma = this.getDataPrismaExecutor(await this.dataPrismaForTable(tableId));
+
+    await dataPrisma.tableTrash.create({
       data: {
         id: operationId,
         tableId,
@@ -83,7 +129,9 @@ export class TableTrashListener {
 
     if (!operationId) return;
 
-    await this.prismaService.tableTrash.create({
+    const dataPrisma = this.getDataPrismaExecutor(await this.dataPrismaForTable(tableId));
+
+    await dataPrisma.tableTrash.create({
       data: {
         id: operationId,
         tableId,

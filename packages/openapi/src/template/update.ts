@@ -20,6 +20,12 @@ export const templateCoverRoSchema = notifyVoSchema
   .extend({
     name: z.string(),
     id: z.string().startsWith(IdPrefix.Attachment),
+    thumbnailPath: z
+      .object({
+        lg: z.string(),
+        sm: z.string(),
+      })
+      .optional(),
   });
 
 export type ITemplateCoverRo = z.infer<typeof templateCoverRoSchema>;
@@ -27,11 +33,13 @@ export type ITemplateCoverRo = z.infer<typeof templateCoverRoSchema>;
 export const updateTemplateRoSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
-  categoryId: z.string().optional(),
+  categoryId: z.array(z.string()).optional(),
   cover: templateCoverRoSchema.optional().nullable(),
   isPublished: z.boolean().optional(),
+  featured: z.boolean().optional(),
   isSystem: z.boolean().optional(),
   baseId: z.string().optional(),
+  markdownDescription: z.string().optional(),
 });
 
 export type IUpdateTemplateRo = z.infer<typeof updateTemplateRoSchema>;

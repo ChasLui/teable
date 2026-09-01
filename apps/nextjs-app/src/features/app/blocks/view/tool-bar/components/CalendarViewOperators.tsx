@@ -1,40 +1,24 @@
-import { Filter as FilterIcon, Share2, Plus, EyeOff, Settings } from '@teable/icons';
+import { Filter as FilterIcon, Share2, EyeOff, Settings, AlertTriangle } from '@teable/icons';
 import type { CalendarView } from '@teable/sdk';
-import { ViewFilter, VisibleFields, useTablePermission, CreateRecordModal } from '@teable/sdk';
+import { ViewFilter, VisibleFields } from '@teable/sdk';
 import { useView } from '@teable/sdk/hooks/use-view';
-import { Button, cn } from '@teable/ui-lib/shadcn';
+import { cn } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
-import { GUIDE_VIEW_FILTERING } from '@/components/Guide';
 import { tableConfig } from '@/features/i18n/table.config';
 import { CalendarConfig } from '../../calendar/components/CalendarConfig';
 import { useToolbarChange } from '../../hooks/useToolbarChange';
 import { ToolBarButton } from '../ToolBarButton';
-import { UndoRedoButtons } from './UndoRedoButtons';
+import { ScrollableToolbarGroup } from './ScrollableToolbarGroup';
 
 export const CalendarViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
   const { disabled } = props;
   const view = useView() as CalendarView | undefined;
-  const permission = useTablePermission();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
   const { onFilterChange } = useToolbarChange();
-
   if (!view) return null;
 
   return (
-    <div className="flex items-center gap-2">
-      <UndoRedoButtons />
-      <div className="mx-2 h-4 w-px shrink-0 bg-slate-200" />
-      <CreateRecordModal>
-        <Button
-          className="size-6 shrink-0 rounded-full p-0"
-          size={'xs'}
-          variant={'outline'}
-          disabled={!permission['record|create']}
-        >
-          <Plus className="size-4" />
-        </Button>
-      </CreateRecordModal>
-      <div className="mx-2 h-4 w-px shrink-0 bg-slate-200" />
+    <ScrollableToolbarGroup className="items-center">
       <CalendarConfig>
         <ToolBarButton
           disabled={disabled}
@@ -45,7 +29,7 @@ export const CalendarViewOperators: React.FC<{ disabled?: boolean }> = (props) =
           <Settings className="size-4 text-sm" />
         </ToolBarButton>
       </CalendarConfig>
-      <VisibleFields>
+      <VisibleFields responsive>
         {(_text, _isActive) => (
           <ToolBarButton
             disabled={disabled}
@@ -58,34 +42,38 @@ export const CalendarViewOperators: React.FC<{ disabled?: boolean }> = (props) =
         )}
       </VisibleFields>
       <ViewFilter
+        responsive
         filters={view?.filter || null}
         onChange={onFilterChange}
         contentHeader={
           view.enableShare && (
-            <div className="flex max-w-full items-center justify-start rounded-t bg-accent px-4 py-2 text-[11px]">
-              <Share2 className="mr-4 size-4 shrink-0" />
+            <div className="mb-2 flex max-w-full items-center justify-start rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground dark:bg-white/5">
+              <Share2 className="me-2 size-4 shrink-0" />
               <span className="text-muted-foreground">{t('table:toolbar.viewFilterInShare')}</span>
             </div>
           )
         }
       >
-        {(text, isActive) => (
+        {(text, isActive, hasWarning) => (
           <ToolBarButton
             disabled={disabled}
             isActive={isActive}
             text={text}
             className={cn(
-              GUIDE_VIEW_FILTERING,
-              'max-w-xs',
+              'max-w-[200px]',
               isActive &&
-                'bg-violet-100 dark:bg-violet-600/30 hover:bg-violet-200 dark:hover:bg-violet-500/30'
+                'bg-violet-100 dark:bg-violet-600/30 hover:bg-violet-200 dark:hover:bg-violet-500/30',
+              hasWarning && 'border-yellow-500'
             )}
             textClassName="@2xl/toolbar:inline"
           >
-            <FilterIcon className="size-4 text-sm" />
+            <>
+              <FilterIcon className="size-4 shrink-0 text-sm" />
+              {hasWarning && <AlertTriangle className="size-3.5 shrink-0 text-yellow-500" />}
+            </>
           </ToolBarButton>
         )}
       </ViewFilter>
-    </div>
+    </ScrollableToolbarGroup>
   );
 };

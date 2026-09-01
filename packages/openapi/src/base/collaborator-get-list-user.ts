@@ -10,6 +10,7 @@ export const listBaseCollaboratorUserRoSchema = z.object({
   skip: z.coerce.number().optional(),
   take: z.coerce.number().optional(),
   includeSystem: z.coerce.boolean().optional(),
+  orderBy: z.enum(['desc', 'asc']).optional(),
 });
 
 export type IListBaseCollaboratorUserRo = z.infer<typeof listBaseCollaboratorUserRoSchema>;
@@ -51,6 +52,7 @@ export const ListBaseCollaboratorUserRoute: RouteConfig = registerRoute({
       },
     },
   },
+  tags: ['base'],
 });
 
 export const getUserCollaborators = async (

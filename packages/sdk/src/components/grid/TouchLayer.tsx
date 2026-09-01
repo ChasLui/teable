@@ -77,13 +77,14 @@ export const TouchLayer: FC<ITouchLayerProps> = (props) => {
     searchCursor,
     mouseState,
     rowControls,
+    rowControlPaddingX,
     imageManager,
     spriteManager,
     forceRenderFlag,
     rowIndexVisible,
     groupCollection,
     collapsedGroupIds,
-    columnHeaderVisible,
+    columnHeaderHeight,
     getCellContent,
     getLinearRow,
     real2RowIndex,
@@ -267,6 +268,7 @@ export const TouchLayer: FC<ITouchLayerProps> = (props) => {
           searchCursor={searchCursor}
           coordInstance={coordInstance}
           rowControls={rowControls}
+          rowControlPaddingX={rowControlPaddingX}
           imageManager={imageManager}
           spriteManager={spriteManager}
           visibleRegion={visibleRegion}
@@ -280,7 +282,7 @@ export const TouchLayer: FC<ITouchLayerProps> = (props) => {
           selection={emptySelection}
           isSelecting={false}
           forceRenderFlag={forceRenderFlag}
-          columnHeaderVisible={columnHeaderVisible}
+          columnHeaderHeight={columnHeaderHeight}
           columnFreezeState={DEFAULT_FREEZE_COLUMN_STATE}
           columnResizeState={DEFAULT_COLUMN_RESIZE_STATE}
           hoverCellPosition={null}

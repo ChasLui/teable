@@ -1,10 +1,20 @@
-import { Controller, Get, HttpCode, Post, Req, Res } from '@nestjs/common';
-import type { IGetTempTokenVo, IUserMeVo } from '@teable/openapi';
+import { Controller, Delete, Get, HttpCode, Post, Query, Req, Res } from '@nestjs/common';
+import { HttpErrorCode } from '@teable/core';
+import {
+  deleteUserSchemaRo,
+  IDeleteUserSchema,
+  type IGetTempTokenVo,
+  type IUserMeVo,
+} from '@teable/openapi';
 import { Response } from 'express';
 import { ClsService } from 'nestjs-cls';
 import { AUTH_SESSION_COOKIE_NAME } from '../../const';
+import { CustomHttpException } from '../../custom.exception';
 import type { IClsStore } from '../../types/cls';
+import { ZodValidationPipe } from '../../zod.validation.pipe';
+import { DeleteUserService } from '../user/delete-user/delete-user.service';
 import { AuthService } from './auth.service';
+import { AllowAnonymous, AllowAnonymousType } from './decorators/allow-anonymous.decorator';
 import { TokenAccess } from './decorators/token.decorator';
 import { SessionService } from './session/session.service';
 
@@ -13,9 +23,11 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly sessionService: SessionService,
-    private readonly cls: ClsService<IClsStore>
+    private readonly cls: ClsService<IClsStore>,
+    private readonly deleteUserService: DeleteUserService
   ) {}
 
+  @AllowAnonymous(AllowAnonymousType.USER)
   @Post('signout')
   @HttpCode(200)
   async signout(@Req() req: Express.Request, @Res({ passthrough: true }) res: Response) {
@@ -23,6 +35,7 @@ export class AuthController {
     res.clearCookie(AUTH_SESSION_COOKIE_NAME);
   }
 
+  @AllowAnonymous(AllowAnonymousType.USER)
   @Get('/user/me')
   async me(@Req() request: Express.Request) {
     return {
@@ -40,5 +53,23 @@ export class AuthController {
   @Get('temp-token')
   async tempToken(): Promise<IGetTempTokenVo> {
     return this.authService.getTempToken();
+  }
+
+  @Delete('user')
+  async deleteUser(
+    @Req() req: Express.Request,
+    @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(deleteUserSchemaRo)) query: IDeleteUserSchema
+  ) {
+    if (query.confirm !== 'DELETE') {
+      throw new CustomHttpException('Invalid confirm', HttpErrorCode.VALIDATION_ERROR, {
+        localization: {
+          i18nKey: 'httpErrors.auth.invalidConfirm',
+        },
+      });
+    }
+    await this.deleteUserService.deleteUser();
+    await this.sessionService.signout(req);
+    res.clearCookie(AUTH_SESSION_COOKIE_NAME);
   }
 }

@@ -6,14 +6,16 @@ import { z } from '../zod';
 import type { IGroupPointsVo } from './type';
 import { groupPointsVoSchema } from './type';
 
-export const groupPointsRoSchema = contentQueryBaseSchema.pick({
-  viewId: true,
-  filter: true,
-  search: true,
-  groupBy: true,
-  collapsedGroupIds: true,
-  ignoreViewQuery: true,
-});
+export const groupPointsRoSchema = contentQueryBaseSchema
+  .pick({
+    viewId: true,
+    filter: true,
+    search: true,
+    groupBy: true,
+    collapsedGroupIds: true,
+    ignoreViewQuery: true,
+  })
+  .partial();
 
 export type IGroupPointsRo = z.infer<typeof groupPointsRoSchema>;
 
@@ -50,6 +52,7 @@ export const getGroupPoints = async (tableId: string, query?: IGroupPointsRo) =>
       ...query,
       filter: JSON.stringify(query?.filter),
       groupBy: JSON.stringify(query?.groupBy),
+      collapsedGroupIds: JSON.stringify(query?.collapsedGroupIds),
     },
   });
 };

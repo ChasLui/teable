@@ -16,7 +16,7 @@ export const CalendarToolbar: React.FC<{ disabled?: boolean }> = (props) => {
 
   return (
     <div className="flex w-full items-center justify-between gap-2 border-b px-4 py-2 @container/toolbar">
-      <ShareViewFilter filters={view?.filter || null} onChange={onFilterChange}>
+      <ShareViewFilter responsive filters={view?.filter || null} onChange={onFilterChange}>
         {(text, isActive) => (
           <ToolBarButton
             disabled={disabled}
@@ -34,7 +34,7 @@ export const CalendarToolbar: React.FC<{ disabled?: boolean }> = (props) => {
         )}
       </ShareViewFilter>
       <div className="flex w-10 flex-1 justify-end">
-        <SearchButton />
+        <SearchButton shareView />
       </div>
     </div>
   );

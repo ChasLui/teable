@@ -1,9 +1,9 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { Module } from '@nestjs/common';
 import { ConditionalModule } from '@nestjs/config';
-import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { authConfig, type IAuthConfig } from '../../configs/auth.config';
 import { AccessTokenModule } from '../access-token/access-token.module';
+import { DeleteUserModule } from '../user/delete-user/delete-user.module';
 import { UserModule } from '../user/user.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -15,8 +15,12 @@ import { SessionModule } from './session/session.module';
 import { SessionSerializer } from './session/session.serializer';
 import { SocialModule } from './social/social.module';
 import { AccessTokenStrategy } from './strategies/access-token.strategy';
+import { AnonymousStrategy } from './strategies/anonymous/anonymous.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SessionStrategy } from './strategies/session.strategy';
+import { TurnstileModule } from './turnstile/turnstile.module';
+
+const CONDITIONAL_MODULE_TIMEOUT = process.env.CI ? 30000 : 5000;
 
 @Module({
   imports: [
@@ -24,20 +28,17 @@ import { SessionStrategy } from './strategies/session.strategy';
     PassportModule.register({ session: true }),
     SessionModule,
     AccessTokenModule,
-    ConditionalModule.registerWhen(LocalAuthModule, (env) => {
-      return Boolean(env.PASSWORD_LOGIN_DISABLED !== 'true');
-    }),
+    ConditionalModule.registerWhen(
+      LocalAuthModule,
+      (env) => {
+        return Boolean(env.PASSWORD_LOGIN_DISABLED !== 'true');
+      },
+      { timeout: CONDITIONAL_MODULE_TIMEOUT }
+    ),
     SocialModule,
     PermissionModule,
-    JwtModule.registerAsync({
-      useFactory: (config: IAuthConfig) => ({
-        secret: config.jwt.secret,
-        signOptions: {
-          expiresIn: config.jwt.expiresIn,
-        },
-      }),
-      inject: [authConfig.KEY],
-    }),
+    TurnstileModule,
+    DeleteUserModule,
   ],
   providers: [
     AuthService,
@@ -47,6 +48,7 @@ import { SessionStrategy } from './strategies/session.strategy';
     SessionStoreService,
     AccessTokenStrategy,
     JwtStrategy,
+    AnonymousStrategy,
   ],
   exports: [AuthService, AuthGuard],
   controllers: [AuthController],

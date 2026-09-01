@@ -27,10 +27,9 @@ export const CollaboratorList = (props: ICollaboratorListProps) => {
   }, [search, isComposing, onSearch, setApplySearchDebounced]);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center gap-x-4">
+    <div className="flex size-full h-full flex-col">
+      <div className="mb-6 flex w-full items-center gap-x-4">
         <Input
-          className="h-8"
           type="search"
           placeholder={searchPlaceholder}
           value={search}
@@ -43,7 +42,7 @@ export const CollaboratorList = (props: ICollaboratorListProps) => {
         />
         {inputRight}
       </div>
-      <div className="mb-0.5 space-y-5">
+      <div className="mb-0.5 flex flex-1 grow flex-col space-y-5 overflow-y-auto">
         {isSearching ? (
           <div className="flex justify-center">
             <Spin />

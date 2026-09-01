@@ -21,6 +21,8 @@ import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { useEffect, useState } from 'react';
+import { useCutDown } from '@/features/app/hooks/useCutDown';
+import { usePublicSettingQuery } from '@/features/app/hooks/useSetting';
 
 export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation('common');
@@ -32,12 +34,16 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState('');
   const { user } = useSession();
   const router = useRouter();
+  const { countdown, setCountdown } = useCutDown();
+
+  const { data: setting } = usePublicSettingQuery();
+  const { changeEmailSendCodeMailRate } = setting ?? {};
 
   useEffect(() => {
     setError('');
   }, [currentPassword, newEmail, code]);
 
-  const { mutate: sendChangeEmailCodeMutation, isLoading: sendChangeEmailCodeLoading } =
+  const { mutate: sendChangeEmailCodeMutation, isPending: sendChangeEmailCodeLoading } =
     useMutation({
       mutationFn: (ro: ISendChangeEmailCodeRo) => {
         if (ro.email === user.email) {
@@ -52,6 +58,9 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
           setSendSuccess(false);
         }, 2000);
         toast.success(t('settings.account.changeEmail.success.sendSuccess'));
+        if (typeof changeEmailSendCodeMailRate === 'number' && changeEmailSendCodeMailRate > 0) {
+          setCountdown(changeEmailSendCodeMailRate);
+        }
       },
       meta: {
         preventGlobalError: true,
@@ -61,6 +70,18 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
           setError(t('settings.account.changeEmail.error.invalidConflict'));
         } else if (error.code === HttpErrorCode.INVALID_CREDENTIALS) {
           setError(t('settings.account.changeEmail.error.invalidPassword'));
+        } else if (
+          error.code === HttpErrorCode.TOO_MANY_REQUESTS &&
+          error.data &&
+          typeof error.data === 'object' &&
+          'seconds' in error.data
+        ) {
+          setError(
+            t('settings.account.changeEmail.error.sendMailRateLimit', {
+              seconds: error.data.seconds,
+            })
+          );
+          return;
         } else {
           setError(error.message);
         }
@@ -69,7 +90,7 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
 
   const {
     mutate: changeEmailMutation,
-    isLoading: changeEmailLoading,
+    isPending: changeEmailLoading,
     isSuccess,
   } = useMutation({
     mutationFn: changeEmail,
@@ -96,22 +117,20 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
   return (
     <Dialog>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="md:w-80">
+      <DialogContent className="md:w-[400px]">
         <DialogHeader>
-          <DialogTitle className="text-center text-sm">
-            {t('settings.account.changeEmail.title')}
-          </DialogTitle>
-          <DialogDescription className="text-center text-xs">
+          <DialogTitle className="text-base">{t('settings.account.changeEmail.title')}</DialogTitle>
+          <DialogDescription className="text-sm">
             {t('settings.account.changeEmail.desc')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground" htmlFor="currentPassword">
+            <Label className="font-normal text-foreground" htmlFor="currentPassword">
               {t('settings.account.changeEmail.current')}
             </Label>
             <Input
-              className="h-7"
+              size="sm"
               id="currentPassword"
               autoComplete="current-password"
               type="password"
@@ -121,11 +140,11 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground" htmlFor="newEmail">
+            <Label className="font-normal text-foreground" htmlFor="newEmail">
               {t('settings.account.changeEmail.new')}
             </Label>
             <Input
-              className="h-7"
+              size="sm"
               id="newEmail"
               autoComplete="new-email"
               type="email"
@@ -135,7 +154,7 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs text-muted-foreground" htmlFor="code">
+              <Label className="font-normal text-foreground" htmlFor="code">
                 {t('settings.account.changeEmail.code')}
               </Label>
               <Button
@@ -145,23 +164,26 @@ export function ChangeEmailDialog({ children }: { children: React.ReactNode }) {
                   !sendSuccess &&
                   sendChangeEmailCodeMutation({ email: newEmail, password: currentPassword })
                 }
-                disabled={sendChangeEmailCodeLoading || !newEmail || !currentPassword}
+                disabled={
+                  sendChangeEmailCodeLoading || !newEmail || !currentPassword || countdown > 0
+                }
               >
                 {sendChangeEmailCodeLoading && <Spin className="size-4" />}
                 {sendSuccess && <Check className="size-4 text-green-500 dark:text-green-400" />}
-                {t('settings.account.changeEmail.getCode')}
+                {countdown > 0 ? `${countdown}s` : t('settings.account.changeEmail.getCode')}
               </Button>
             </div>
             <Input
-              className="h-7"
+              size="sm"
               id="code"
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
             />
           </div>
+          <ErrorComponent className="!mt-4 text-xs" error={error} />
         </div>
-        <ErrorComponent className="break-all text-center" error={error} />
+
         <Button
           className="w-full"
           size={'sm'}

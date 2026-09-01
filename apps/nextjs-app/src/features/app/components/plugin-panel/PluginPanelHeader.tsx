@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit, MoreHorizontal, Plus, X } from '@teable/icons';
-import { deletePluginPanel, listPluginPanels, renamePluginPanel } from '@teable/openapi';
+import { Copy, Edit, MoreHorizontal, Plus, X } from '@teable/icons';
+import {
+  deletePluginPanel,
+  duplicatePluginPanel,
+  listPluginPanels,
+  renamePluginPanel,
+} from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { useTablePermission } from '@teable/sdk/hooks';
 import {
@@ -13,6 +18,7 @@ import {
   DropdownMenuTrigger,
   Input,
 } from '@teable/ui-lib/shadcn';
+import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useTranslation } from 'next-i18next';
 import { useRef, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
@@ -44,15 +50,27 @@ export const PluginPanelHeader = (props: { tableId: string }) => {
   const { mutate: deletePluginPanelMutate } = useMutation({
     mutationFn: () => deletePluginPanel(tableId, activePluginPanelId),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.getPluginPanelList(tableId));
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.getPluginPanelList(tableId) });
     },
   });
 
   const { mutate: renamePluginPanelMutate } = useMutation({
     mutationFn: (name: string) => renamePluginPanel(tableId, activePluginPanelId, { name }),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.getPluginPanelList(tableId));
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.getPluginPanelList(tableId) });
       setRename(null);
+    },
+  });
+
+  const { mutate: duplicatePluginPanelMutate } = useMutation({
+    mutationFn: (name: string) =>
+      duplicatePluginPanel(tableId, activePluginPanelId, {
+        name: `${name} ${t('common:noun.copy')}`,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.getPluginPanelList(tableId) });
+      setRename(null);
+      toast.success(t('table:table.actionTips.copySuccessful'));
     },
   });
 
@@ -69,7 +87,8 @@ export const PluginPanelHeader = (props: { tableId: string }) => {
       <PluginPanelSelector tableId={tableId} />
       <Input
         ref={renameRef}
-        className={cn('absolute h-7 left-0 right-0', {
+        size="sm"
+        className={cn('absolute start-0 end-0', {
           hidden: rename === null,
         })}
         value={rename ?? ''}
@@ -89,15 +108,15 @@ export const PluginPanelHeader = (props: { tableId: string }) => {
       <div className="flex gap-1">
         <CreatePluginDialog tableId={tableId}>
           <Button variant="outline" size="xs">
-            <Plus />
+            <Plus className="size-4 shrink-0" />
             <span className="hidden @xs/plugin-panel-header:inline">{t('table:addPlugin')}</span>
           </Button>
         </CreatePluginDialog>
         {canManage && (
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="xs">
-                <MoreHorizontal className="size-3.5" />
+              <Button variant="outline" size="icon-xs">
+                <MoreHorizontal className="size-3.5 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="relative min-w-36 overflow-hidden">
@@ -107,16 +126,26 @@ export const PluginPanelHeader = (props: { tableId: string }) => {
                   setTimeout(() => renameRef.current?.focus(), 200);
                 }}
               >
-                <Edit className="mr-1.5" />
+                <Edit className="me-1.5" />
                 {t('common:actions.rename')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (activePluginPanel?.name) {
+                    duplicatePluginPanelMutate(activePluginPanel.name);
+                  }
+                }}
+              >
+                <Copy className="me-1.5" />
+                {t('common:actions.duplicate')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <MenuDeleteItem onConfirm={deletePluginPanelMutate} />
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Button variant="outline" size="xs" onClick={toggleVisible}>
-          <X />
+        <Button variant="outline" size="icon-xs" onClick={toggleVisible}>
+          <X className="size-4 shrink-0" />
         </Button>
       </div>
     </div>

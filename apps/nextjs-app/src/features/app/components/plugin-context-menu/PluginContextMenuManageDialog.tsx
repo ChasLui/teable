@@ -25,7 +25,6 @@ import {
   DialogOverlay,
   Input,
 } from '@teable/ui-lib/shadcn';
-import Image from 'next/image';
 import { useTranslation } from 'next-i18next';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
@@ -68,7 +67,7 @@ export const PluginContextMenuManageDialog = forwardRef<
     setPluginContextMenuList(pluginContextMenu);
   }, [pluginContextMenu]);
 
-  const { mutate: deletePluginContextMenu, isLoading: isDeleting } = useMutation({
+  const { mutate: deletePluginContextMenu, isPending: isDeleting } = useMutation({
     mutationFn: ({ pluginInstallId }: { pluginInstallId: string }) =>
       removePluginContextMenu(tableId, pluginInstallId),
     onSuccess: () => {
@@ -171,12 +170,12 @@ export const PluginContextMenuManageDialog = forwardRef<
                 }}
               >
                 <Button size={'sm'} variant={'outline'}>
-                  <Plus />
+                  <Plus className="size-4 shrink-0" />
                   {t('table:addPlugin')}
                 </Button>
               </PluginCenterDialog>
               <Button size={'sm'} variant={'outline'} onClick={() => setOpen(false)}>
-                <X />
+                <X className="size-4 shrink-0" />
               </Button>
             </div>
           </div>
@@ -202,12 +201,10 @@ export const PluginContextMenuManageDialog = forwardRef<
                     key={activePlugin.pluginInstallId}
                     className="flex items-center gap-2 rounded-sm bg-muted p-1"
                   >
-                    <Image
+                    <img
                       src={activePlugin.logo}
                       alt={activePlugin.name}
-                      width={30}
-                      height={30}
-                      className="rounded-sm"
+                      className="size-[30px] rounded-sm"
                     />
                     <div className="line-clamp-1 flex-1 text-[13px]">{activePlugin.name}</div>
                   </div>
@@ -223,20 +220,17 @@ export const PluginContextMenuManageDialog = forwardRef<
                         className="group flex h-10 items-center gap-2 rounded-sm px-1 hover:bg-muted"
                         {...listeners}
                       >
-                        <Image
+                        <img
                           src={plugin.logo}
                           alt={plugin.name}
-                          width={30}
-                          height={30}
-                          quality={100}
-                          className="rounded-sm"
+                          className="size-[30px] rounded-sm"
                         />
                         <div className="relative flex h-full flex-1 items-center text-[13px]">
                           <p className="line-clamp-1">{plugin.name}</p>
                           {renamePluginInstallId === plugin.pluginInstallId && (
                             <Input
                               ref={renameInputRef}
-                              className="absolute z-20 flex-1 bg-background text-[13px]"
+                              className="absolute z-20 flex-1 text-[13px]"
                               value={name}
                               // eslint-disable-next-line jsx-a11y/no-autofocus
                               autoFocus
@@ -269,7 +263,7 @@ export const PluginContextMenuManageDialog = forwardRef<
                               setName(plugin.name);
                             }}
                           >
-                            <Pencil />
+                            <Pencil className="size-4 shrink-0" />
                           </Button>
                           <Button
                             size={'icon'}
@@ -279,7 +273,7 @@ export const PluginContextMenuManageDialog = forwardRef<
                               setDeletePluginInstallId(plugin.pluginInstallId);
                             }}
                           >
-                            <Trash2 />
+                            <Trash2 className="size-4 shrink-0" />
                           </Button>
                           <DraggableHandle className="size-4 text-gray-500" />
                         </div>

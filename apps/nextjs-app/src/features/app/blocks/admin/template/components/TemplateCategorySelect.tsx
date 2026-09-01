@@ -21,48 +21,50 @@ import {
   Button,
   cn,
   Input,
-  useToast,
 } from '@teable/ui-lib/shadcn';
+import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useTranslation } from 'next-i18next';
 import { useMemo, useRef, useState } from 'react';
 
 interface ITemplateCategorySelectProps {
   templateId: string;
-  value?: string;
-  onChange: (name: string) => void;
+  value?: string[];
+  onChange: (ids: string[]) => void;
 }
 
 interface ICategoryCommandItemProps {
-  value?: string;
-  onChange: (name: string) => void;
+  selectedIds?: string[];
+  onToggle: (id: string) => void;
   templateCategory: ITemplateCategoryListVo;
 }
 
 const CategoryCommandItem = (props: ICategoryCommandItemProps) => {
-  const { value, onChange, templateCategory } = props;
+  const { selectedIds, onToggle, templateCategory } = props;
   const [isEditing, setIsEditing] = useState(false);
   const queryClient = useQueryClient();
   const { mutate: deleteTemplateCategoryFn } = useMutation({
     mutationFn: (id: string) => deleteTemplateCategory(id),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.templateCategoryList());
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.templateCategoryList() });
     },
   });
   const { mutate: updateTemplateCategoryFn } = useMutation({
     mutationFn: (id: string) => updateTemplateCategory(id, { name }),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.templateCategoryList());
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.templateCategoryList() });
       setIsEditing(false);
     },
   });
   const [name, setName] = useState(templateCategory.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isSelected = selectedIds?.includes(templateCategory.id);
+
   return (
     <CommandItem
       key={templateCategory.id}
       value={templateCategory.name}
       onSelect={() => {
-        onChange(templateCategory.name);
+        onToggle(templateCategory.id);
       }}
       className="flex h-8 items-center justify-between gap-1"
     >
@@ -76,12 +78,14 @@ const CategoryCommandItem = (props: ICategoryCommandItemProps) => {
           }}
           onBlur={(e) => {
             e.stopPropagation();
-            name && updateTemplateCategoryFn(templateCategory.id);
+            if (name) {
+              updateTemplateCategoryFn(templateCategory.id);
+            }
           }}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') {
-              name && updateTemplateCategoryFn(templateCategory.id);
+            if (e.key === 'Enter' && name) {
+              updateTemplateCategoryFn(templateCategory.id);
             }
 
             if (e.key === 'Escape') {
@@ -117,7 +121,7 @@ const CategoryCommandItem = (props: ICategoryCommandItemProps) => {
           >
             <Trash className="size-3 text-red-500" />
           </Button>
-          <Check className={cn('shrink-0', value === templateCategory.name ? 'block' : 'hidden')} />
+          <Check className={cn('shrink-0', isSelected ? 'block' : 'hidden')} />
         </div>
       )}
     </CommandItem>
@@ -125,10 +129,9 @@ const CategoryCommandItem = (props: ICategoryCommandItemProps) => {
 };
 
 export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
-  const { value, onChange, templateId } = props;
+  const { value = [], onChange, templateId } = props;
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const { data: templateCategoryList } = useQuery({
     queryKey: ReactQueryKeys.templateCategoryList(),
     queryFn: () => getTemplateCategoryList().then((data) => data.data),
@@ -138,16 +141,17 @@ export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
     mutationFn: ({ templateId, updateRo }: { templateId: string; updateRo: IUpdateTemplateRo }) =>
       updateTemplate(templateId, { ...updateRo }),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.templateList());
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.templateList() });
     },
   });
 
   const { mutate: createTemplateCategoryFn } = useMutation({
     mutationFn: (name: string) => createTemplateCategory({ name }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(ReactQueryKeys.templateCategoryList());
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.templateCategoryList() });
       setSearchValue('');
-      updateTemplateFn({ templateId, updateRo: { categoryId: res.data.id } });
+      const newCategoryId = [...value, res.data.id];
+      updateTemplateFn({ templateId, updateRo: { categoryId: newCategoryId } });
     },
   });
 
@@ -158,9 +162,21 @@ export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
     return Boolean(templateCategoryList?.find((tmp) => tmp.name === searchValue));
   }, [templateCategoryList, searchValue]);
 
-  const errorTip = t('settings.templateAdmin.tips.errorCategoryName');
+  const selectedCategories = useMemo(() => {
+    return templateCategoryList?.filter((tmp) => value.includes(tmp.id)) || [];
+  }, [templateCategoryList, value]);
 
-  const selectedCategory = templateCategoryList?.find((tmp) => tmp.id === value)?.name;
+  const handleToggleCategory = (categoryId: string) => {
+    const newValue = value.includes(categoryId)
+      ? value.filter((id) => id !== categoryId)
+      : [...value, categoryId];
+    onChange(newValue);
+  };
+
+  const displayText =
+    selectedCategories.length > 0
+      ? selectedCategories.map((cat) => cat.name).join(', ')
+      : t('settings.templateAdmin.actions.selectCategory');
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -171,19 +187,7 @@ export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
           aria-expanded={open}
           className="w-[200px] justify-between"
         >
-          <span className="truncate text-xs">
-            {value ? (
-              <span
-                className={cn({
-                  'text-red-500': !selectedCategory,
-                })}
-              >
-                {selectedCategory ?? errorTip}
-              </span>
-            ) : (
-              t('settings.templateAdmin.actions.selectCategory')
-            )}
-          </span>
+          <span className="truncate text-xs">{displayText}</span>
           <ChevronsUpDown className="opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -200,11 +204,8 @@ export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
                 <CategoryCommandItem
                   key={tmp.id}
                   templateCategory={tmp}
-                  onChange={() => {
-                    setOpen(false);
-                    onChange(tmp.id);
-                  }}
-                  value={value}
+                  onToggle={handleToggleCategory}
+                  selectedIds={value}
                 />
               ))}
             </CommandGroup>
@@ -216,17 +217,16 @@ export const TemplateCategorySelect = (props: ITemplateCategorySelectProps) => {
                 size={'xs'}
                 onClick={() => {
                   if (!searchValue) {
-                    toast({
-                      title: t('settings.templateAdmin.tips.addCategoryTips'),
-                    });
+                    toast.warning(t('settings.templateAdmin.tips.addCategoryTips'));
+                  } else {
+                    createTemplateCategoryFn(searchValue);
                   }
-                  searchValue && createTemplateCategoryFn(searchValue);
                 }}
               >
                 <Plus className="size-4 shrink-0" />
                 <span className="truncate" title={searchValue}>
                   {t('settings.templateAdmin.actions.addCategory')}
-                  <span className="ml-2 text-sm text-gray-500">
+                  <span className="ms-2 text-sm text-gray-500">
                     {searchValue ? `"${searchValue}"` : ''}
                   </span>
                 </span>

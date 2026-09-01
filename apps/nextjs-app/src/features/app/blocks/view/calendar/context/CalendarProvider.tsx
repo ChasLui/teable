@@ -7,9 +7,11 @@ import {
   useFields,
   useTablePermission,
   usePersonalView,
+  useButtonClickStatus,
 } from '@teable/sdk/hooks';
 import type { CalendarView } from '@teable/sdk/model';
-import { useContext, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/router';
+import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useCalendarFields } from '../hooks';
 import { CalendarContext } from './CalendarContext';
 
@@ -22,6 +24,16 @@ export const CalendarProvider = ({ children }: { children: ReactNode }) => {
   const permission = useTablePermission();
   const allFields = useFields({ withHidden: true, withDenied: true });
   const [expandRecordId, setExpandRecordId] = useState<string>();
+  const buttonClickStatusHook = useButtonClickStatus(tableId!, shareId);
+  const router = useRouter();
+  const { recordId: routerRecordId } = router.query;
+
+  // The same route sync kanban and gallery already do: a `?recordId=` link — the one the
+  // expand panel's copy button hands out — has to open that record when the calendar loads,
+  // and closing the panel has to take it back out of the url.
+  useEffect(() => {
+    setExpandRecordId(routerRecordId as string);
+  }, [routerRecordId, setExpandRecordId]);
 
   const { startDateField, endDateField, titleField, colorConfig } = useCalendarFields();
 
@@ -92,6 +104,28 @@ export const CalendarProvider = ({ children }: { children: ReactNode }) => {
     calendarPermission,
   ]);
 
+  const onClose = () => {
+    setExpandRecordId(undefined);
+    // an event click never touched the url, so there is nothing to clean up
+    if (!routerRecordId) return;
+    const {
+      recordId: _recordId,
+      showHistory: _showHistory,
+      showComment: _showComment,
+      ...resetQuery
+    } = router.query;
+    router.push(
+      {
+        pathname: router.pathname,
+        query: resetQuery,
+      },
+      undefined,
+      {
+        shallow: true,
+      }
+    );
+  };
+
   return (
     <CalendarContext.Provider value={value}>
       {allFields.length > 0 && children}
@@ -101,7 +135,8 @@ export const CalendarProvider = ({ children }: { children: ReactNode }) => {
           viewId={view?.id}
           recordId={expandRecordId}
           recordIds={expandRecordId ? [expandRecordId] : []}
-          onClose={() => setExpandRecordId(undefined)}
+          buttonClickStatusHook={buttonClickStatusHook}
+          onClose={onClose}
         />
       )}
     </CalendarContext.Provider>

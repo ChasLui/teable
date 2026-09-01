@@ -2,12 +2,38 @@ import { Table2 } from '@teable/icons';
 import { AnchorContext, FieldProvider, TablePermissionProvider } from '@teable/sdk/context';
 import { useTables } from '@teable/sdk/hooks';
 import { Selector } from '@teable/ui-lib/base';
-import { Tabs, TabsContent } from '@teable/ui-lib/shadcn';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  Tabs,
+  TabsContent,
+} from '@teable/ui-lib/shadcn';
+import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
+import { useBaseResource } from '../../hooks/useBaseResource';
+import { DynamicBaseErd } from '../erd/DynamicBaseErd';
 import { FieldSetting } from '../view/field/FieldSetting';
 import { DataTable } from './data-table/DataTable';
 import { TableDetail } from './TableDetail';
+
+const BaseErdialog = ({ baseId }: { baseId: string }) => {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline">ERD</Button>
+      </DialogTrigger>
+      <DialogContent
+        className="flex max-w-7xl p-0"
+        style={{ width: 'calc(100% - 40px)', height: 'calc(100% - 100px)' }}
+      >
+        <DynamicBaseErd baseId={baseId} />
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const TablePicker = ({
   tableId,
@@ -47,8 +73,9 @@ const TablePicker = ({
 export const TableTabs = () => {
   const tables = useTables();
   const router = useRouter();
-  const tableId = router.query.tableId as string;
-  const baseId = router.query.baseId as string;
+  const { baseId } = useBaseResource();
+  const searchParams = useSearchParams();
+  const tableId = searchParams.get('tableId') ?? '';
 
   return (
     <Tabs
@@ -58,7 +85,7 @@ export const TableTabs = () => {
       }
       className="space-y-4"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
         <TablePicker
           tableId={tableId}
           readonly={false}
@@ -66,6 +93,7 @@ export const TableTabs = () => {
             router.push({ pathname: router.pathname, query: { ...router.query, tableId } })
           }
         />
+        <BaseErdialog baseId={baseId} />
       </div>
 
       {tables.map((table) => (

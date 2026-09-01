@@ -1,6 +1,5 @@
 import { FieldType, TimeFormatting } from '@teable/core';
-import { useTableId, useTablePermission, useView } from '@teable/sdk/hooks';
-import { Field } from '@teable/sdk/model';
+import { useFieldOperations, useTableId, useTablePermission, useView } from '@teable/sdk/hooks';
 import {
   Button,
   Dialog,
@@ -15,8 +14,8 @@ import { useEffect, useState } from 'react';
 import {
   getFormatStringForLanguage,
   localFormatStrings,
-  systemTimeZone,
-} from '@/features/app/components/field-setting/formatting/DatetimeFormatting';
+} from '@/features/app/components/field-setting/formatting/date-format-strings';
+import { systemTimeZone } from '@/features/app/components/field-setting/formatting/DatetimeFormatting';
 import { tableConfig } from '@/features/i18n/table.config';
 import { useCalendar } from '../hooks';
 
@@ -26,6 +25,7 @@ export const AddDateFieldDialog = () => {
   const tableId = useTableId();
   const permission = useTablePermission();
   const { startDateField, endDateField } = useCalendar();
+  const { createField } = useFieldOperations();
   const [open, setOpen] = useState(false);
 
   const hasDateField = startDateField || endDateField;
@@ -48,25 +48,31 @@ export const AddDateFieldDialog = () => {
       timeZone: systemTimeZone,
     };
 
-    const startDateField = await Field.createField(tableId, {
-      name: t('table:calendar.dialog.startDate'),
-      type: FieldType.Date,
-      options: {
-        formatting: defaultFormatting,
+    const startDateField = await createField({
+      tableId,
+      fieldRo: {
+        name: t('table:calendar.dialog.startDate'),
+        type: FieldType.Date,
+        options: {
+          formatting: defaultFormatting,
+        },
       },
     });
-    const endDateField = await Field.createField(tableId, {
-      name: t('table:calendar.dialog.endDate'),
-      type: FieldType.Date,
-      options: {
-        formatting: defaultFormatting,
+    const endDateField = await createField({
+      tableId,
+      fieldRo: {
+        name: t('table:calendar.dialog.endDate'),
+        type: FieldType.Date,
+        options: {
+          formatting: defaultFormatting,
+        },
       },
     });
 
     if (view != null && viewUpdatable) {
       await view.updateOption({
-        startDateFieldId: startDateField.data.id,
-        endDateFieldId: endDateField.data.id,
+        startDateFieldId: startDateField.id,
+        endDateFieldId: endDateField.id,
       });
     }
     setOpen(false);

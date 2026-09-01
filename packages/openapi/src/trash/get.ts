@@ -2,19 +2,12 @@ import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import { FieldType, IdPrefix, ViewType } from '@teable/core';
 import { axios } from '../axios';
 import { userCollaboratorItem } from '../space';
+import { ResourceType } from '../types';
 import { registerRoute } from '../utils';
 import { z } from '../zod';
+import { TrashType, TableTrashType } from './types';
 
 export const GET_TRASH = '/trash';
-
-export enum ResourceType {
-  Space = 'space',
-  Base = 'base',
-  Table = 'table',
-  View = 'view',
-  Field = 'field',
-  Record = 'record',
-}
 
 export const userMapVoSchema = z.record(
   z.string().startsWith(IdPrefix.User),
@@ -23,19 +16,20 @@ export const userMapVoSchema = z.record(
       email: true,
       avatar: true,
     })
-    .merge(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-      })
-    )
+    .extend({
+      id: z.string(),
+      name: z.string(),
+    })
 );
+
+export type IUserMapVo = z.infer<typeof userMapVoSchema>;
 
 const fieldSnapshotItemVoSchema = z.object({
   id: z.string(),
   name: z.string(),
-  type: z.nativeEnum(FieldType),
+  type: z.enum(FieldType),
   isLookup: z.boolean().nullable(),
+  isConditionalLookup: z.boolean().nullable().optional(),
   options: z.array(z.string()).nullish(),
 });
 
@@ -47,7 +41,7 @@ const recordSnapshotItemVoSchema = z.object({
 const viewSnapshotItemVoSchema = z.object({
   id: z.string(),
   name: z.string(),
-  type: z.nativeEnum(ViewType),
+  type: z.enum(ViewType),
 });
 
 export const resourceMapVoSchema = z.record(
@@ -56,6 +50,7 @@ export const resourceMapVoSchema = z.record(
     z.object({
       id: z.string().startsWith(IdPrefix.Space),
       name: z.string(),
+      avatar: z.string().nullable().optional(),
     }),
     z.object({
       id: z.string().startsWith(IdPrefix.Base),
@@ -64,6 +59,14 @@ export const resourceMapVoSchema = z.record(
     }),
     z.object({
       id: z.string().startsWith(IdPrefix.Table),
+      name: z.string(),
+    }),
+    z.object({
+      id: z.string().startsWith(IdPrefix.App),
+      name: z.string(),
+    }),
+    z.object({
+      id: z.string().startsWith(IdPrefix.Workflow),
       name: z.string(),
     }),
     viewSnapshotItemVoSchema,
@@ -79,7 +82,8 @@ export type IRecordSnapshotItemVo = z.infer<typeof recordSnapshotItemVoSchema>;
 export type IResourceMapVo = z.infer<typeof resourceMapVoSchema>;
 
 export const trashRoSchema = z.object({
-  resourceType: z.enum([ResourceType.Space, ResourceType.Base]),
+  spaceId: z.string().startsWith(IdPrefix.Space).optional(),
+  resourceType: z.enum([TrashType.Space, TrashType.Base]),
 });
 
 export type ITrashRo = z.infer<typeof trashRoSchema>;
@@ -87,15 +91,18 @@ export type ITrashRo = z.infer<typeof trashRoSchema>;
 export const trashItemVoSchema = z.object({
   id: z.string(),
   resourceId: z.string(),
-  resourceType: z.enum([ResourceType.Space, ResourceType.Base, ResourceType.Table]),
+  resourceType: z.enum(TrashType),
   deletedTime: z.string(),
   deletedBy: z.string(),
 });
 
 export const tableTrashItemVoSchema = z.object({
   id: z.string(),
+  // Preview only: a bulk deletion can reference tens of thousands of resources, so the
+  // list returns the first few ids; the full set is paged through the item records endpoint.
   resourceIds: z.array(z.string()),
-  resourceType: z.enum([ResourceType.View, ResourceType.Field, ResourceType.Record]),
+  totalResourceCount: z.number(),
+  resourceType: z.enum(TableTrashType),
   deletedTime: z.string(),
   deletedBy: z.string(),
 });

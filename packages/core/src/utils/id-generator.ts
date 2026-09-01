@@ -4,6 +4,9 @@ export enum IdPrefix {
   Space = 'spc',
   Base = 'bse',
 
+  BaseNode = 'bno',
+  BaseNodeFolder = 'bnf',
+
   Table = 'tbl',
   Field = 'fld',
   View = 'viw',
@@ -57,13 +60,44 @@ export enum IdPrefix {
 
   Template = 'tpl',
   TemplateCategory = 'tpc',
+
+  Task = 'tsk',
+  TaskRun = 'trn',
+
+  Chat = 'cht',
+  ChatMessage = 'cmm',
+
+  Query = 'qry',
+
+  App = 'app',
+
+  AiProxyToken = 'apt',
+}
+
+export enum RandomType {
+  String = 'string',
+  Number = 'number',
 }
 
 const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const nanoid = customAlphabet(chars);
 
-export function getRandomString(len: number) {
+const charsNumber = '0123456789';
+const nanoidNumber = customAlphabet(charsNumber);
+
+export function getRandomString(len: number, type: RandomType = RandomType.String) {
+  if (type === RandomType.Number) {
+    return nanoidNumber(len);
+  }
   return nanoid(len);
+}
+
+export function generateBaseNodeId() {
+  return IdPrefix.BaseNode + getRandomString(16);
+}
+
+export function generateBaseNodeFolderId() {
+  return IdPrefix.BaseNodeFolder + getRandomString(16);
 }
 
 export function generateTableId() {
@@ -223,4 +257,44 @@ export function generateTemplateId() {
 
 export function generateTemplateCategoryId() {
   return IdPrefix.TemplateCategory + getRandomString(16);
+}
+
+export function generateTaskId() {
+  return IdPrefix.Task + getRandomString(16);
+}
+
+export function generateTaskRunId() {
+  return IdPrefix.TaskRun + getRandomString(16);
+}
+
+export function generateChatId() {
+  return IdPrefix.Chat + getRandomString(16);
+}
+
+export function generateChatMessageId() {
+  return IdPrefix.ChatMessage + getRandomString(16);
+}
+
+export function generateQueryId() {
+  return IdPrefix.Query + getRandomString(16);
+}
+
+export function generateAppId() {
+  return IdPrefix.App + getRandomString(16);
+}
+
+export function generateAiProxyTokenId() {
+  return IdPrefix.AiProxyToken + getRandomString(24);
+}
+
+/**
+ * Generate a cryptographically random signing secret for AI Proxy Token JWTs.
+ * 48 chars of base62 ≈ 285 bits of entropy — sufficient for HMAC-SHA256.
+ */
+export function generateAiProxyTokenSign() {
+  return getRandomString(48);
+}
+
+export function generateLogId() {
+  return getRandomString(25);
 }

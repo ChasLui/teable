@@ -15,11 +15,14 @@ export const temporaryPasteRoSchema = rangesRoSchema
     ignoreViewQuery: true,
   })
   .extend({
-    content: z.string().openapi({
-      description: 'Content to paste',
-      example: 'John\tDoe\tjohn.doe@example.com',
-    }),
-    header: z.array(fieldVoSchema).optional().openapi({
+    content: z
+      .string()
+      .or(z.array(z.array(z.unknown())))
+      .meta({
+        description: 'Content to paste',
+        example: 'John\tDoe\tjohn.doe@example.com',
+      }),
+    header: z.array(fieldVoSchema).optional().meta({
       description: 'Table header for paste operation',
       example: [],
     }),

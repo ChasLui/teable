@@ -1,9 +1,24 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ViewType } from '@teable/core';
-import { Search, X } from '@teable/icons';
-import { getTableActivatedIndex, TableIndex, RecommendedIndexRow } from '@teable/openapi';
+import { AlertCircle, Search, X } from '@teable/icons';
+import {
+  getTableActivatedIndex,
+  TableIndex,
+  RecommendedIndexRow,
+  getTableAbnormalIndex,
+  repairTableIndex,
+  DEFAULT_MAX_SEARCH_FIELD_COUNT,
+} from '@teable/openapi';
 import { LocalStorageKeys, useView } from '@teable/sdk';
-import { useBaseId, useFields, useRowCount, useSearch, useTableId } from '@teable/sdk/hooks';
+import {
+  useBaseId,
+  useFields,
+  useRowCount,
+  useSearch,
+  useTableId,
+  useTablePermission,
+} from '@teable/sdk/hooks';
+import { Spin } from '@teable/ui-lib/base';
 import {
   cn,
   Popover,
@@ -19,12 +34,18 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
   Checkbox,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipPortal,
+  TooltipTrigger,
 } from '@teable/ui-lib/shadcn';
 import { isEqual } from 'lodash';
 import { useTranslation } from 'next-i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useDebounce, useLocalStorage } from 'react-use';
+import { useEnv } from '@/features/app/hooks/useEnv';
 import { useGridSearchStore } from '../grid/useGridSearchStore';
 import { ToolBarButton } from '../tool-bar/ToolBarButton';
 import type { ISearchCommandRef } from './SearchCommand';
@@ -40,6 +61,8 @@ export interface ISearchButtonProps {
 
 export const SearchButton = (props: ISearchButtonProps) => {
   const { className, textClassName, shareView = false } = props;
+  const env = useEnv();
+  const { maxSearchFieldCount = DEFAULT_MAX_SEARCH_FIELD_COUNT } = env;
   const [active, setActive] = useState(false);
   const fields = useFields();
   const tableId = useTableId();
@@ -52,9 +75,13 @@ export const SearchButton = (props: ISearchButtonProps) => {
   const [shouldTips, setShouldTips] = useState(true);
   const [noPrompt, setNoPrompt] = useState(false);
   const baseId = useBaseId();
+  const queryClient = useQueryClient();
+  const permission = useTablePermission();
+  const hasTableUpdatePermission = Boolean(permission['table|update']);
 
   const [inputValue, setInputValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
+  const [inputKey, setInputKey] = useState(0);
   const { t } = useTranslation(['common', 'table']);
   const searchComposition = useRef(false);
   const ref = useRef<HTMLInputElement>(null);
@@ -65,7 +92,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
   );
   const [lsHideNotMatch, setLsHideNotMatchRow] = useLocalStorage<boolean>(
     LocalStorageKeys.SearchHideNotMatchRow,
-    false
+    true
   );
   const [searchFieldMapCache, setSearchFieldMap] = useLocalStorage<Record<string, string[]>>(
     LocalStorageKeys.TableSearchFieldsCache,
@@ -82,6 +109,24 @@ export const SearchButton = (props: ISearchButtonProps) => {
     queryKey: ['table-index', tableId],
     queryFn: () => getTableActivatedIndex(baseId!, tableId!).then(({ data }) => data),
     enabled: !shareView,
+  });
+
+  const enabledSearchIndex = tableActivatedIndex?.includes(TableIndex.search);
+
+  const { data: searchAbnormalIndex = [] } = useQuery({
+    queryKey: ['table-abnormal-index', baseId, tableId, TableIndex.search],
+    queryFn: () =>
+      getTableAbnormalIndex(baseId!, tableId!, TableIndex.search).then(({ data }) => data),
+    enabled: Boolean(enabledSearchIndex && !shareView),
+  });
+
+  const { mutateAsync: repairIndexFn, isPending: repairIndexLoading } = useMutation({
+    mutationFn: (type: TableIndex) => repairTableIndex(baseId!, tableId!, type),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ['table-abnormal-index', baseId, tableId, TableIndex.search],
+      });
+    },
   });
 
   useHotkeys(
@@ -244,54 +289,87 @@ export const SearchButton = (props: ISearchButtonProps) => {
     }
     const fieldIds = fieldId?.split(',') || [];
     const fieldName = fields.find((f) => f.id === fieldIds[0])?.name;
+    // A single field shows its bare name in every language; zh/ja carry no `_one`
+    // plural form, so an explicit `field_one` lookup would fall back to English.
     if (fieldIds.length === 1) {
-      return t('table:view.search.field_one', { name: fieldName });
+      return fieldName;
     }
     if (fieldIds.length > 1) {
-      return t('table:view.search.field_other', { name: fieldName, length: fieldIds?.length });
+      return t('table:view.search.field', { count: fieldIds.length, length: fieldIds.length });
     }
   }, [fieldId, fields, t]);
+
+  const showAlert = useMemo(() => {
+    if (fieldId === 'all_fields') {
+      return fields.length > maxSearchFieldCount;
+    }
+    const fieldIds = fieldId?.split(',') || [];
+    return fieldIds.length > maxSearchFieldCount;
+  }, [fieldId, fields, maxSearchFieldCount]);
 
   return active ? (
     <div
       className={cn(
-        'left-6 top-60 flex h-7 shrink-0 items-center gap-1 overflow-hidden rounded-xl bg-background p-0 pr-[7px] text-xs border outline-muted-foreground w-80',
+        'start-6 top-60 flex h-7 shrink-0 items-center gap-1 overflow-hidden rounded-xl bg-background p-0 pe-[7px] text-xs border outline-muted-foreground w-80',
         {
           outline: isFocused,
         }
       )}
     >
-      <Popover modal>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            size={'xs'}
-            className="flex w-[64px] shrink-0 items-center justify-center overflow-hidden truncate rounded-none border-r px-px"
-            ref={commandTrigger}
-          >
-            <span className="truncate" title={searchHeader}>
-              {searchHeader}
-            </span>
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="max-w-96 p-1">
-          {fieldId && tableId && (
-            <SearchCommand
-              value={fieldId}
-              hideNotMatchRow={hideNotMatchRow}
-              onChange={onFieldChangeHandler}
-              shareView={shareView}
-              ref={searchCommandRef}
-              onHideSwitchChange={(checked) => {
-                setLsHideNotMatchRow(checked);
-                setHideNotMatchRow(checked);
-              }}
-            />
-          )}
-        </PopoverContent>
-      </Popover>
+      <TooltipProvider>
+        <Tooltip>
+          <Popover modal>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size={'xs'}
+                className="flex shrink-0 items-center justify-center overflow-hidden truncate rounded-none border-e px-2"
+                ref={commandTrigger}
+              >
+                <TooltipTrigger>
+                  <div className="flex items-center gap-1">
+                    {showAlert && <AlertCircle className="size-3 shrink-0" />}
+
+                    <span className="truncate" title={searchHeader}>
+                      {searchHeader}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                {showAlert && (
+                  <TooltipPortal>
+                    <TooltipContent>
+                      <p>
+                        {t('table:table.searchTips.maxFieldTips_limited', {
+                          count: maxSearchFieldCount,
+                        })}
+                      </p>
+                    </TooltipContent>
+                  </TooltipPortal>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="max-w-96 p-0">
+              {fieldId && tableId && (
+                <SearchCommand
+                  value={fieldId}
+                  hideNotMatchRow={hideNotMatchRow}
+                  onChange={onFieldChangeHandler}
+                  shareView={shareView}
+                  ref={searchCommandRef}
+                  onHideSwitchChange={(checked) => {
+                    setLsHideNotMatchRow(checked);
+                    setHideNotMatchRow(checked);
+                  }}
+                />
+              )}
+            </PopoverContent>
+          </Popover>
+        </Tooltip>
+      </TooltipProvider>
+
       <div className="flex flex-1 justify-between overflow-hidden">
         <input
+          key={inputKey}
           ref={ref}
           className="placeholder:text-muted-foregrounds min-w-0 grow rounded-md bg-transparent px-1 outline-none"
           placeholder={t('actions.search')}
@@ -308,6 +386,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
           }}
           onChange={(e) => {
             if (
+              hasTableUpdatePermission &&
               shouldTips &&
               rowCount &&
               rowCount > RecommendedIndexRow &&
@@ -319,6 +398,9 @@ export const SearchButton = (props: ISearchButtonProps) => {
               setAlertVisible(true);
               return;
             }
+            if (hasTableUpdatePermission && searchAbnormalIndex.length) {
+              setAlertVisible(true);
+            }
             setInputValue(e.target.value);
             if (e.target.value === '') {
               setSearchCursor(null);
@@ -326,6 +408,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
           }}
           onBlur={() => {
             setIsFocused(false);
+            setInputKey((k) => k + 1);
           }}
           onFocus={() => {
             setIsFocused(true);
@@ -355,12 +438,14 @@ export const SearchButton = (props: ISearchButtonProps) => {
         </div>
       </div>
 
-      <AlertDialog open={alertVisible} onOpenChange={setAlertVisible}>
+      <AlertDialog open={hasTableUpdatePermission && alertVisible} onOpenChange={setAlertVisible}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('table:import.title.tipsTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t('table:table.index.autoIndexTip', { rowCount: RecommendedIndexRow })}
+              {searchAbnormalIndex.length
+                ? t('table:table.index.repairTip')
+                : t('table:table.index.autoIndexTip', { rowCount: RecommendedIndexRow })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center">
@@ -373,7 +458,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
             />
             <label
               htmlFor="noTips"
-              className="pl-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              className="ps-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
               {t('table:import.tips.noTips')}
             </label>
@@ -385,10 +470,19 @@ export const SearchButton = (props: ISearchButtonProps) => {
                 setShouldTips(false);
               }}
             >
-              {t('table:table.index.keepAsIs')}
+              {searchAbnormalIndex?.length
+                ? t('table:table.index.ignoreIndexError')
+                : t('table:table.index.keepAsIs')}
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
+              onClick={async (e) => {
+                if (searchAbnormalIndex?.length) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  tableId && baseId && (await repairIndexFn(TableIndex.search));
+                  setAlertVisible(false);
+                  return;
+                }
                 commandTrigger?.current?.click();
                 setTimeout(() => {
                   searchCommandRef?.current?.toggleSearchIndex();
@@ -396,7 +490,10 @@ export const SearchButton = (props: ISearchButtonProps) => {
                 }, 0);
               }}
             >
-              {t('table:table.index.enableIndex')}
+              {searchAbnormalIndex?.length
+                ? t('table:table.index.repair')
+                : t('table:table.index.enableIndex')}
+              {repairIndexLoading && <Spin className="size-3" />}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -410,7 +507,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
         setActive(true);
       }}
     >
-      <Search className="size-4" />
+      <Search className="size-4 shrink-0" />
     </ToolBarButton>
   );
 };

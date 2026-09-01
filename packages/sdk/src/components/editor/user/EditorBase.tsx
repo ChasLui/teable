@@ -33,6 +33,7 @@ export interface IUserEditorBaseProps extends ICellEditor<IUserCellValue | IUser
   onSearch?: (value: string) => void;
   collaborators?: ICollaborator[];
   isLoading?: boolean;
+  initialSearch?: string;
 }
 
 export type IUserEditorRef = IEditorRef<IUserCellValue | IUserCellValue[] | undefined>;
@@ -50,11 +51,13 @@ const UserEditorBaseRef: ForwardRefRenderFunction<IUserEditorRef, IUserEditorBas
     collaborators,
     onChange,
     onSearch,
+    initialSearch,
   } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { t } = useTranslation();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch ?? '');
   const [isComposing, setIsComposing] = useState(false);
+  const [highlightedUserId, setHighlightedUserId] = useState('');
 
   useImperativeHandle(ref, () => ({
     focus: () => {
@@ -95,8 +98,27 @@ const UserEditorBaseRef: ForwardRefRenderFunction<IUserEditorRef, IUserEditorBas
     }
   }, [search, isComposing, onSearch, setApplySearchDebounced]);
 
+  useEffect(() => {
+    if (isMultiple) return;
+
+    if (!collaborators?.length) {
+      setHighlightedUserId('');
+      return;
+    }
+
+    if (!collaborators.some((collaborator) => collaborator.userId === highlightedUserId)) {
+      setHighlightedUserId(collaborators[0].userId);
+    }
+  }, [collaborators, highlightedUserId, isMultiple]);
+
   return (
-    <Command className={className} style={style} shouldFilter={false}>
+    <Command
+      className={className}
+      style={style}
+      shouldFilter={false}
+      value={highlightedUserId}
+      onValueChange={setHighlightedUserId}
+    >
       <CommandInput
         ref={inputRef}
         value={search}
@@ -109,7 +131,7 @@ const UserEditorBaseRef: ForwardRefRenderFunction<IUserEditorRef, IUserEditorBas
         <CommandEmpty>{t('common.search.empty')}</CommandEmpty>
         <CommandGroup aria-valuetext="name">
           {isLoading ? (
-            <CommandItem className="flex items-center space-x-4">
+            <CommandItem className="flex items-center space-x-4 rtl:space-x-reverse">
               <Skeleton className="size-7 rounded-full" />
               <Skeleton className="h-4 w-32" />
             </CommandItem>
@@ -117,13 +139,13 @@ const UserEditorBaseRef: ForwardRefRenderFunction<IUserEditorRef, IUserEditorBas
             collaborators?.map(({ userId, userName, avatar, email }) => (
               <CommandItem
                 key={userId}
-                value={userName}
+                value={userId}
                 onSelect={() => onSelect({ id: userId, title: userName, avatarUrl: avatar, email })}
                 className="flex justify-between"
               >
                 <UserOption name={userName} email={email} avatar={avatar} />
                 <Check
-                  className={cn('ml-2 h-4 w-4', activeStatus(userId) ? 'opacity-100' : 'opacity-0')}
+                  className={cn('ms-2 h-4 w-4', activeStatus(userId) ? 'opacity-100' : 'opacity-0')}
                 />
               </CommandItem>
             ))

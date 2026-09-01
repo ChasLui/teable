@@ -1,4 +1,5 @@
 import { dehydrate, QueryClient } from '@tanstack/react-query';
+import { LastVisitResourceType } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import type { GetServerSideProps } from 'next';
 import type { ReactElement } from 'react';
@@ -18,13 +19,32 @@ export const getServerSideProps: GetServerSideProps = withEnv(
   ensureLogin(
     withAuthSSR(async (context, ssrApi) => {
       const queryClient = new QueryClient();
-
-      await Promise.all([
+      const [userLastVisitSpace, spaceList] = await Promise.all([
+        ssrApi.getUserLastVisit(LastVisitResourceType.Space, ''),
         queryClient.fetchQuery({
           queryKey: ReactQueryKeys.spaceList(),
           queryFn: () => ssrApi.getSpaceList(),
         }),
+      ]);
 
+      const spaceIds = spaceList.map((space) => space.id);
+      const spaceId =
+        userLastVisitSpace?.resourceId && spaceIds.includes(userLastVisitSpace?.resourceId)
+          ? userLastVisitSpace?.resourceId
+          : spaceIds[0];
+      if (spaceId) {
+        // Preserve query parameters when redirecting (e.g., action=createFromTemplate&tid=xxx)
+        const queryString = context.req.url?.split('?')[1];
+        const destination = queryString ? `/space/${spaceId}?${queryString}` : `/space/${spaceId}`;
+        return {
+          redirect: {
+            destination,
+            permanent: false,
+          },
+        };
+      }
+
+      await Promise.all([
         queryClient.fetchQuery({
           queryKey: ReactQueryKeys.baseAll(),
           queryFn: () => ssrApi.getBaseList(),
@@ -38,6 +58,11 @@ export const getServerSideProps: GetServerSideProps = withEnv(
         queryClient.fetchQuery({
           queryKey: ReactQueryKeys.getPublicSetting(),
           queryFn: () => ssrApi.getPublicSetting(),
+        }),
+
+        queryClient.fetchQuery({
+          queryKey: ReactQueryKeys.recentlyBase(),
+          queryFn: () => ssrApi.getRecentlyBase(),
         }),
       ]);
 

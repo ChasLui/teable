@@ -14,6 +14,7 @@ import {
 import { useTranslation } from 'next-i18next';
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
+import { usePluginPanelStorage } from '../hooks/usePluginPanelStorage';
 
 interface ICreatePluginPanelDialogProps {
   tableId: string;
@@ -36,14 +37,16 @@ export const CreatePluginPanelDialog = forwardRef<
   const [name, setName] = useState('');
   const [error, setError] = useState<string>();
   const queryClient = useQueryClient();
-  const { mutate: createPluginPanelMutate, isLoading } = useMutation({
+  const { touchActivePanel } = usePluginPanelStorage(tableId);
+  const { mutate: createPluginPanelMutate, isPending: isLoading } = useMutation({
     mutationFn: (name: string) => createPluginPanel(tableId, { name }),
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
       queryClient.invalidateQueries({
         queryKey: ReactQueryKeys.getPluginPanelList(tableId),
       });
       setOpen(false);
       onClose?.();
+      touchActivePanel(data.id);
     },
   });
 
@@ -82,7 +85,7 @@ export const CreatePluginPanelDialog = forwardRef<
                 .min(1)
                 .safeParse(name || undefined);
               if (!valid.success) {
-                setError(valid.error.errors?.[0].message);
+                setError(valid.error.issues?.[0]?.message);
                 return;
               }
               createPluginPanelMutate(name);

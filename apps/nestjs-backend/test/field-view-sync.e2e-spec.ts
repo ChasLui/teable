@@ -1,13 +1,13 @@
 import type { INestApplication } from '@nestjs/common';
-import { Optional } from '@prisma/client/runtime/library';
 import type {
-  IConvertFieldRo,
   IFieldVo,
+  IGridColumnMeta,
   ISelectFieldChoice,
   ISelectFieldOptions,
-  IUpdateFieldRo,
+  IFormColumn,
 } from '@teable/core';
-import { FieldType, ViewType, SortFunc, Colors } from '@teable/core';
+import { FieldKeyType, FieldType, ViewType, SortFunc, Colors, StatisticsFunc } from '@teable/core';
+import { updateRecords } from '@teable/openapi';
 import {
   createTable,
   createView,
@@ -15,7 +15,9 @@ import {
   permanentDeleteTable,
   initApp,
   getViews,
+  updateViewColumnMeta,
   convertField,
+  getRecords,
 } from './utils/init-app';
 
 describe('OpenAPI FieldController (e2e)', () => {
@@ -130,6 +132,8 @@ describe('OpenAPI FieldController (e2e)', () => {
       ],
     });
 
+    expect(gridViewAfterDelete?.columnMeta).not.haveOwnProperty(numberField.id);
+
     expect(kanbanViewAfterDelete).toEqual({
       ...kanbanViewAfterDelete,
       filter: {
@@ -144,7 +148,39 @@ describe('OpenAPI FieldController (e2e)', () => {
       ],
     });
 
+    expect(kanbanViewAfterDelete?.columnMeta).not.haveOwnProperty(numberField.id);
     expect(formViewAfterDelete?.columnMeta).not.haveOwnProperty(numberField.id);
+  });
+
+  it('should set form column visible after setting field notNull without default', async () => {
+    const textField = fields.find(({ type }) => type === FieldType.SingleLineText) as IFieldVo;
+
+    const formView = await createView(tableId, {
+      type: ViewType.Form,
+      name: 'Form',
+    });
+
+    const recordResult = await getRecords(tableId);
+    await updateRecords(tableId, {
+      fieldKeyType: FieldKeyType.Id,
+      records: recordResult.records.map((rec) => ({
+        id: rec.id,
+        fields: { [textField.id]: 'filled' },
+      })),
+    });
+
+    await convertField(tableId, textField.id, {
+      name: textField.name,
+      dbFieldName: textField.dbFieldName,
+      type: textField.type,
+      options: {},
+      notNull: true,
+    });
+
+    const views = await getViews(tableId);
+    const formAfter = views.find(({ id }) => id === formView.id)!;
+    const formColumnMeta = formAfter.columnMeta as unknown as Record<string, IFormColumn>;
+    expect(formColumnMeta[textField.id]?.visible ?? false).toBe(true);
   });
 
   it('should sync the selected value after update select type field option name', async () => {
@@ -274,7 +310,7 @@ describe('OpenAPI FieldController (e2e)', () => {
       options: {
         ...selectField.options,
         choices: newChoices,
-      },
+      } as ISelectFieldOptions,
     });
 
     const views = await getViews(tableId);
@@ -292,5 +328,33 @@ describe('OpenAPI FieldController (e2e)', () => {
         },
       ],
     });
+  });
+
+  it('should clear invalid statisticFunc in columnMeta when field type changes', async () => {
+    const numberField = fields.find(({ type }) => type === FieldType.Number) as IFieldVo;
+
+    const views = await getViews(tableId);
+    const gridView = views.find(({ type }) => type === ViewType.Grid) || views[0];
+
+    await updateViewColumnMeta(tableId, gridView.id, [
+      {
+        fieldId: numberField.id,
+        columnMeta: {
+          statisticFunc: StatisticsFunc.Sum,
+        },
+      },
+    ]);
+
+    await convertField(tableId, numberField.id, {
+      name: numberField.name,
+      dbFieldName: numberField.dbFieldName,
+      type: FieldType.SingleLineText,
+      options: {},
+    });
+
+    const updatedViews = await getViews(tableId);
+    const updatedGridView = updatedViews.find(({ id }) => id === gridView.id)!;
+    const updatedColumnMeta = updatedGridView.columnMeta as unknown as IGridColumnMeta;
+    expect(updatedColumnMeta[numberField.id]?.statisticFunc ?? null).toBe(null);
   });
 });

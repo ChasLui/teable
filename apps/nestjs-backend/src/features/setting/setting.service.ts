@@ -14,115 +14,142 @@
  * the brand assets, may result in legal action.
  */
 
-import { join } from 'path';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@teable/db-main-prisma';
-import { UploadType, type ISettingVo, type IUpdateSettingRo } from '@teable/openapi';
+import { SettingKey } from '@teable/openapi';
+import type { ISettingVo } from '@teable/openapi';
+import { isArray } from 'lodash';
 import { ClsService } from 'nestjs-cls';
-import { BaseConfig, IBaseConfig } from '../../configs/base.config';
+import { PerformanceCacheService } from '../../performance-cache';
 import type { IClsStore } from '../../types/cls';
-import StorageAdapter from '../attachments/plugins/adapter';
-import { InjectStorageAdapter } from '../attachments/plugins/storage';
-import { getFullStorageUrl } from '../attachments/plugins/utils';
+import { decryptAiConfigSecrets, encryptAiConfigSecrets } from '../../utils/ai-config-encryption';
+import { getPublicFullStorageUrl } from '../attachments/plugins/utils';
+import { parseSettingContent, SettingModel } from '../model/setting';
 
 @Injectable()
 export class SettingService {
+  private readonly logger = new Logger(SettingService.name);
+
   constructor(
     private readonly prismaService: PrismaService,
-    @BaseConfig() private readonly baseConfig: IBaseConfig,
-    @InjectStorageAdapter() readonly storageAdapter: StorageAdapter,
-    private readonly cls: ClsService<IClsStore>
+    private readonly cls: ClsService<IClsStore>,
+    private readonly settingModel: SettingModel,
+    private readonly performanceCacheService: PerformanceCacheService
   ) {}
 
-  async getSetting(): Promise<ISettingVo> {
-    return await this.prismaService.setting
-      .findFirstOrThrow({
-        select: {
-          instanceId: true,
-          disallowSignUp: true,
-          disallowSpaceCreation: true,
-          disallowSpaceInvitation: true,
-          enableEmailVerification: true,
-          aiConfig: true,
-          brandName: true,
-          brandLogo: true,
-        },
-      })
-      .then((setting) => ({
-        ...setting,
-        aiConfig: setting.aiConfig ? JSON.parse(setting.aiConfig as string) : null,
-        brandLogo: setting.brandLogo
-          ? getFullStorageUrl(StorageAdapter.getBucket(UploadType.Logo), setting.brandLogo)
-          : null,
-      }))
-      .catch(() => {
-        throw new NotFoundException('Setting not found');
-      });
-  }
-
-  async getServerBrand(): Promise<{ brandName: string; brandLogo: string }> {
-    return {
-      brandName: 'Teable',
-      brandLogo: `${this.baseConfig.publicOrigin}/images/favicon/apple-touch-icon.png`,
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  async getSetting(names?: string[]): Promise<ISettingVo> {
+    const settings = await this.settingModel.getSetting();
+    const res: Record<string, unknown> = {
+      instanceId: '',
     };
-  }
-
-  async uploadLogo(file: Express.Multer.File) {
-    const token = 'brand';
-    const path = join(StorageAdapter.getDir(UploadType.Logo), 'brand');
-    const bucket = StorageAdapter.getBucket(UploadType.Logo);
-    const { hash } = await this.storageAdapter.uploadFileWidthPath(bucket, path, file.path, {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      'Content-Type': file.mimetype,
-    });
-    const { size, mimetype } = file;
-    const setting = await this.getSetting();
-
-    await this.prismaService.txClient().attachments.upsert({
-      create: {
-        hash,
-        size,
-        mimetype,
-        token,
-        path,
-        createdBy: this.cls.get('user.id'),
-      },
-      update: {
-        hash,
-        size,
-        mimetype,
-        path,
-      },
-      where: {
-        token,
-        deletedTime: null,
-      },
-    });
-
-    await this.prismaService.setting.update({
-      where: { instanceId: setting.instanceId },
-      data: {
-        brandLogo: path,
-      },
-    });
-
-    return {
-      url: getFullStorageUrl(StorageAdapter.getBucket(UploadType.Logo), path),
-    };
-  }
-
-  async updateSetting(updateSettingRo: IUpdateSettingRo) {
-    const setting = await this.getSetting();
-
-    const data: object = updateSettingRo;
-    if ('aiConfig' in data) {
-      // if statement to prevent "aiConfig" removal in case that field is not provided
-      data['aiConfig'] = updateSettingRo.aiConfig ? JSON.stringify(updateSettingRo.aiConfig) : null;
+    if (!isArray(settings)) {
+      return res as ISettingVo;
     }
 
-    return await this.prismaService.setting.update({
-      where: { instanceId: setting.instanceId },
-      data,
+    const nameSet = names ? new Set(names) : new Set(settings.map((setting) => setting.name));
+    for (const setting of settings) {
+      if (!nameSet.has(setting.name)) {
+        continue;
+      }
+
+      if (setting.name === SettingKey.BRAND_LOGO) {
+        res[setting.name] = setting.content
+          ? getPublicFullStorageUrl(setting.content as string)
+          : setting.content;
+      } else {
+        res[setting.name] = setting.content;
+      }
+
+      if (setting.name === SettingKey.INSTANCE_ID) {
+        res.createdTime =
+          setting.createdTime instanceof Date
+            ? setting.createdTime.toISOString()
+            : setting.createdTime;
+      }
+    }
+
+    // Secrets are stored (and cached in the Redis setting blob) encrypted;
+    // decrypting after the cache keeps only ciphertext in Redis.
+    if (res[SettingKey.AI_CONFIG]) {
+      res[SettingKey.AI_CONFIG] = decryptAiConfigSecrets(
+        res[SettingKey.AI_CONFIG],
+        'setting.aiConfig'
+      );
+    }
+
+    // spaceIds are stripped from the Redis setting blob; hydrate only when canary is requested.
+    if (nameSet.has(SettingKey.CANARY_CONFIG)) {
+      const canaryConfig = await this.settingModel.getCanaryConfigFromDb();
+      if (canaryConfig) {
+        res[SettingKey.CANARY_CONFIG] = canaryConfig;
+      }
+    }
+
+    // Apply environment variable overrides
+    this.applyEnvOverrides(res);
+
+    return res as ISettingVo;
+  }
+
+  /**
+   * Apply environment variable overrides for settings
+   * - TEST_AI_CONFIG: Completely overrides aiConfig (for testing)
+   * - AI_GATEWAY_API_KEY: Fallback for aiConfig.aiGatewayApiKey if not set
+   */
+  private applyEnvOverrides(res: Record<string, unknown>): void {
+    // TEST_AI_CONFIG completely overrides aiConfig (for testing)
+    const testAiConfig = process.env.TEST_AI_CONFIG;
+    if (testAiConfig) {
+      try {
+        res[SettingKey.AI_CONFIG] = JSON.parse(testAiConfig);
+      } catch {
+        this.logger.warn('Failed to parse TEST_AI_CONFIG environment variable');
+      }
+    }
+
+    // AI_GATEWAY_API_KEY fallback for aiConfig.aiGatewayApiKey
+    const envAiGatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+    if (envAiGatewayApiKey) {
+      const aiConfig = res[SettingKey.AI_CONFIG] as Record<string, unknown> | undefined;
+      if (!aiConfig?.aiGatewayApiKey) {
+        res[SettingKey.AI_CONFIG] = {
+          ...aiConfig,
+          aiGatewayApiKey: envAiGatewayApiKey,
+        };
+      }
+    }
+  }
+
+  async updateSetting(updateSettingRo: Partial<ISettingVo>): Promise<ISettingVo> {
+    const userId = this.cls.get('user.id');
+    const updates = Object.entries(updateSettingRo).map(([name, value]) => {
+      const stored = name === SettingKey.AI_CONFIG ? encryptAiConfigSecrets(value) : value;
+      const content = JSON.stringify(stored ?? null);
+      return {
+        where: { name },
+        update: { content, lastModifiedBy: userId },
+        create: {
+          name,
+          content,
+          createdBy: userId,
+        },
+      };
     });
+
+    const results = await Promise.all(
+      updates.map((update) => this.prismaService.txClient().setting.upsert(update))
+    );
+
+    const res: Record<string, unknown> = {};
+    for (const setting of results) {
+      const parsed = parseSettingContent(setting.content);
+      res[setting.name] =
+        setting.name === SettingKey.AI_CONFIG
+          ? decryptAiConfigSecrets(parsed, 'setting.aiConfig')
+          : parsed;
+    }
+
+    return res as ISettingVo;
   }
 }

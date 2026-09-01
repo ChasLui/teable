@@ -1,20 +1,23 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import { axios } from '../../axios';
+import { ResourceType } from '../../types';
 import { registerRoute } from '../../utils';
 import { z } from '../../zod';
 
 export const GET_USER_LAST_VISIT = '/user/last-visit';
 
 export enum LastVisitResourceType {
-  Base = 'base',
-  Table = 'table',
-  View = 'view',
-  Dashboard = 'dashboard',
-  Automation = 'automation',
+  Space = ResourceType.Space,
+  Base = ResourceType.Base,
+  Table = ResourceType.Table,
+  View = ResourceType.View,
+  Dashboard = ResourceType.Dashboard,
+  Workflow = ResourceType.Workflow,
+  App = ResourceType.App,
 }
 
 export const userLastVisitVoSchema = z.object({
-  resourceType: z.nativeEnum(LastVisitResourceType),
+  resourceType: z.enum(LastVisitResourceType),
   resourceId: z.string(),
   childResourceId: z.string().optional(),
 });
@@ -22,7 +25,7 @@ export const userLastVisitVoSchema = z.object({
 export type IUserLastVisitVo = z.infer<typeof userLastVisitVoSchema>;
 
 export const getUserLastVisitRoSchema = z.object({
-  resourceType: z.nativeEnum(LastVisitResourceType),
+  resourceType: z.enum(LastVisitResourceType),
   parentResourceId: z.string(),
 });
 

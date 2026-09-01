@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import type { IOtOperation } from '@teable/core';
-import { IdPrefix, RecordOpBuilder } from '@teable/core';
-import { PrismaService, wrapWithValidationErrorHandler } from '@teable/db-main-prisma';
+import { Injectable, Logger } from '@nestjs/common';
+import { HttpErrorCode, IdPrefix, RecordOpBuilder, FieldType } from '@teable/core';
+import type { IOtOperation, IRecord, TableDomain } from '@teable/core';
+import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { groupBy, isEmpty, keyBy } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -10,15 +10,21 @@ import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { bufferCount, concatMap, from, lastValueFrom } from 'rxjs';
 import { IThresholdConfig, ThresholdConfig } from '../../configs/threshold.config';
+import { CustomHttpException } from '../../custom.exception';
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
+import { DATA_KNEX } from '../../global/knex/knex.module';
+import { DatabaseRouter } from '../../global/database-router.service';
 import type { IRawOp, IRawOpMap } from '../../share-db/interface';
 import { RawOpType } from '../../share-db/interface';
 import type { IClsStore } from '../../types/cls';
+import { handleDBValidationErrors } from '../../utils/db-validation-error';
 import { Timing } from '../../utils/timing';
 import type { IFieldInstance } from '../field/model/factory';
-import { createFieldInstanceByRaw } from '../field/model/factory';
+import { createFieldInstanceByRaw, fieldCore2FieldInstance } from '../field/model/factory';
 import { dbType2knexFormat, SchemaType } from '../field/util';
+import { RecordQueryService } from '../record/record-query.service';
+import { TableDomainQueryService } from '../table-domain/table-domain-query.service';
 import { IOpsMap } from './utils/compose-maps';
 
 export interface IOpsData {
@@ -35,9 +41,12 @@ export class BatchService {
   constructor(
     private readonly cls: ClsService<IClsStore>,
     private readonly prismaService: PrismaService,
-    @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
+    private readonly databaseRouter: DatabaseRouter,
+    @InjectModel(DATA_KNEX) private readonly knex: Knex,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
-    @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
+    @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig,
+    private readonly recordQueryService: RecordQueryService,
+    private readonly tableDomainQueryService: TableDomainQueryService
   ) {}
 
   private async completeMissingCtx(
@@ -99,6 +108,7 @@ export class BatchService {
     opsPair: [recordId: string, IOtOperation[]][]
   ) {
     const raw = await this.fetchRawData(
+      tableId,
       dbTableName,
       opsPair.map(([recordId]) => recordId)
     );
@@ -106,14 +116,26 @@ export class BatchService {
 
     opsPair.map(([recordId]) => {
       if (!versionGroup[recordId]) {
-        throw new BadRequestException(`Record ${recordId} not found in ${tableId}`);
+        throw new CustomHttpException(
+          `Record ${recordId} not found in ${tableId}`,
+          HttpErrorCode.VALIDATION_ERROR,
+          {
+            localization: {
+              i18nKey: 'httpErrors.field.recordNotFound',
+              context: {
+                recordId,
+                tableId,
+              },
+            },
+          }
+        );
       }
     });
 
     const opsData = this.buildRecordOpsData(opsPair, versionGroup);
     if (!opsData.length) return;
 
-    await this.executeUpdateRecords(dbTableName, fieldMap, opsData);
+    await this.executeUpdateRecords(tableId, dbTableName, fieldMap, opsData);
 
     const opDataList = opsPair.map(([recordId, ops]) => {
       return { docId: recordId, version: versionGroup[recordId].__version, data: ops };
@@ -123,15 +145,64 @@ export class BatchService {
   }
 
   @Timing()
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   async updateRecords(
     opsMap: IOpsMap,
     fieldMap: { [fieldId: string]: IFieldInstance } = {},
-    tableId2DbTableName: { [tableId: string]: string } = {}
-  ) {
+    tableId2DbTableName: { [tableId: string]: string } = {},
+    tableDomains?: Map<string, TableDomain>
+  ): Promise<{ [tableId: string]: { [recordId: string]: IRecord } }> {
+    const tableIds = Object.keys(opsMap);
+
+    const domainCache = new Map<string, TableDomain>(tableDomains || []);
+    const missingDomainIds = tableIds.filter((id) => !domainCache.has(id));
+    if (missingDomainIds.length) {
+      const fetched = await this.tableDomainQueryService.getTableDomainsByIds(missingDomainIds);
+      for (const [tid, domain] of fetched) {
+        domainCache.set(tid, domain);
+      }
+    }
+
+    // Prefill table/db mapping and field instances from domains to reduce follow-up lookups
+    for (const [tid, domain] of domainCache) {
+      tableId2DbTableName[tid] ||= domain.dbTableName;
+      for (const field of domain.fieldList) {
+        if (!fieldMap[field.id]) {
+          fieldMap[field.id] = fieldCore2FieldInstance(field);
+        }
+      }
+    }
+
     const result = await this.completeMissingCtx(opsMap, fieldMap, tableId2DbTableName);
     fieldMap = result.fieldMap;
     tableId2DbTableName = result.tableId2DbTableName;
 
+    // Get old records before updating
+    const oldRecords: { [tableId: string]: { [recordId: string]: IRecord } } = {};
+
+    for (const tableId in opsMap) {
+      const recordIds = Object.keys(opsMap[tableId]);
+      if (recordIds.length === 0) continue;
+
+      try {
+        const domain = domainCache.get(tableId);
+        if (!domain) {
+          this.logger.warn(`TableDomain not found for table ${tableId}, skip snapshot read`);
+          oldRecords[tableId] = {};
+          continue;
+        }
+        const snapshots = await this.recordQueryService.getSnapshotBulk(domain, recordIds);
+        oldRecords[tableId] = {};
+        for (const snapshot of snapshots) {
+          oldRecords[tableId][snapshot.id] = snapshot.data;
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to get old records for table ${tableId}: ${error}`);
+        oldRecords[tableId] = {};
+      }
+    }
+
+    // Perform the actual updates
     for (const tableId in opsMap) {
       const dbTableName = tableId2DbTableName[tableId];
       const recordOpsMap = opsMap[tableId];
@@ -150,21 +221,23 @@ export class BatchService {
         )
       );
     }
+
+    return oldRecords;
   }
 
   // @Timing()
-  private async fetchRawData(dbTableName: string, recordIds: string[]) {
+  private async fetchRawData(tableId: string, dbTableName: string, recordIds: string[]) {
     const querySql = this.knex(dbTableName)
       .whereIn('__id', recordIds)
       .select('__id', '__version', '__last_modified_time', '__last_modified_by')
       .toQuery();
 
-    return this.prismaService.txClient().$queryRawUnsafe<
+    return this.databaseRouter.queryDataPrismaForTable<
       {
         __version: number;
         __id: string;
       }[]
-    >(querySql);
+    >(tableId, querySql, { useTransaction: true });
   }
 
   private buildRecordOpsData(
@@ -182,7 +255,15 @@ export class BatchService {
       const updateParam = ops.reduce<{ [fieldId: string]: unknown }>((pre, op) => {
         const opContext = RecordOpBuilder.editor.setRecord.detect(op);
         if (!opContext) {
-          throw new Error(`illegal op ${JSON.stringify(op)} found`);
+          throw new CustomHttpException(
+            `illegal op ${JSON.stringify(op)} found when build record ops data`,
+            HttpErrorCode.VALIDATION_ERROR,
+            {
+              localization: {
+                i18nKey: 'httpErrors.custom.invalidOperation',
+              },
+            }
+          );
         }
         pre[opContext.fieldId] = opContext.newCellValue;
         return pre;
@@ -202,6 +283,7 @@ export class BatchService {
 
   @Timing()
   private async executeUpdateRecords(
+    tableId: string,
     dbTableName: string,
     fieldMap: { [fieldId: string]: IFieldInstance },
     opsData: IOpsData[]
@@ -214,7 +296,7 @@ export class BatchService {
 
     // group by fieldIds before apply
     for (const groupKey in opsDataGroup) {
-      await this.executeUpdateRecordsInner(dbTableName, fieldMap, opsDataGroup[groupKey]);
+      await this.executeUpdateRecordsInner(tableId, dbTableName, fieldMap, opsDataGroup[groupKey]);
     }
   }
 
@@ -222,7 +304,8 @@ export class BatchService {
     dbTableName: string,
     idFieldName: string,
     schemas: { schemaType: SchemaType; dbFieldName: string }[],
-    data: { id: string; values: { [key: string]: unknown } }[]
+    data: { id: string; values: { [key: string]: unknown } }[],
+    routingTableId?: string
   ) {
     const tempTableName = `temp_` + customAlphabet('abcdefghijklmnopqrstuvwxyz', 10)();
     // 1.create temporary table structure
@@ -246,19 +329,100 @@ export class BatchService {
     });
     const dropTempTableSql = this.knex.schema.dropTable(tempTableName).toQuery();
 
-    await this.prismaService.$tx(async (tx) => {
-      // temp table should in one transaction
-      await tx.$executeRawUnsafe(createTempTableSql);
-      // 2.initialize temporary table data
-      await tx.$executeRawUnsafe(insertTempTableSql);
-      // 3.update data
-      await wrapWithValidationErrorHandler(() => tx.$executeRawUnsafe(updateRecordSql));
-      // 4.delete temporary table
-      await tx.$executeRawUnsafe(dropTempTableSql);
-    });
+    const validDbFieldNames = schemas.map((s) => s.dbFieldName).filter((f) => !f.startsWith('__'));
+
+    const resolvedRoutingTableId =
+      routingTableId ??
+      (
+        await this.prismaService.txClient().tableMeta.findFirstOrThrow({
+          where: { dbTableName, deletedTime: null },
+          select: { id: true },
+        })
+      ).id;
+
+    await this.databaseRouter.dataPrismaTransactionForTable(
+      resolvedRoutingTableId,
+      async (tx) => {
+        // temp table should in one transaction
+        await tx.$executeRawUnsafe(createTempTableSql);
+        // 2.initialize temporary table data
+        await tx.$executeRawUnsafe(insertTempTableSql);
+        // 3.update data
+        await handleDBValidationErrors({
+          fn: async () => {
+            await tx.$executeRawUnsafe(updateRecordSql);
+          },
+          handleUniqueError: async () => {
+            const tables = await this.prismaService.tableMeta.findMany({
+              where: { dbTableName },
+              select: { id: true, name: true },
+            });
+            const table = tables[0];
+            const fieldRaws = await this.prismaService.field.findMany({
+              where: {
+                tableId: table.id,
+                dbFieldName: { in: validDbFieldNames },
+                unique: true,
+                deletedTime: null,
+              },
+              select: { id: true, name: true },
+            });
+
+            throw new CustomHttpException(
+              `Fields ${fieldRaws.map((f) => f.id).join(', ')} unique validation failed`,
+              HttpErrorCode.VALIDATION_ERROR,
+              {
+                localization: {
+                  i18nKey: 'httpErrors.custom.fieldValueDuplicate',
+                  context: {
+                    tableName: table.name,
+                    fieldName: fieldRaws.map((f) => f.name).join(', '),
+                  },
+                },
+              }
+            );
+          },
+          handleNotNullError: async () => {
+            const tables = await this.prismaService.tableMeta.findMany({
+              where: { dbTableName },
+              select: { id: true, name: true },
+            });
+            const table = tables[0];
+            const fieldRaws = await this.prismaService.field.findMany({
+              where: {
+                tableId: table.id,
+                dbFieldName: { in: validDbFieldNames },
+                notNull: true,
+                deletedTime: null,
+              },
+              select: { id: true, name: true },
+            });
+
+            throw new CustomHttpException(
+              `Fields ${fieldRaws.map((f) => f.id).join(', ')} not null validation failed`,
+              HttpErrorCode.VALIDATION_ERROR,
+              {
+                localization: {
+                  i18nKey: 'httpErrors.custom.fieldValueNotNull',
+                  context: {
+                    tableName: table.name,
+                    fieldName: fieldRaws.map((f) => f.name).join(', '),
+                  },
+                },
+              }
+            );
+          },
+        });
+        // 4.delete temporary table
+        await tx.$executeRawUnsafe(dropTempTableSql);
+      },
+      undefined,
+      { useTransaction: true }
+    );
   }
 
   private async executeUpdateRecordsInner(
+    tableId: string,
     dbTableName: string,
     fieldMap: { [fieldId: string]: IFieldInstance },
     opsData: IOpsData[]
@@ -267,9 +431,10 @@ export class BatchService {
       return;
     }
 
-    const fieldIds = Array.from(new Set(opsData.flatMap((d) => Object.keys(d.updateParam)))).filter(
-      (id) => fieldMap[id]
-    );
+    const fieldIds = Array.from(new Set(opsData.flatMap((d) => Object.keys(d.updateParam))))
+      .filter((id) => fieldMap[id])
+      .filter((id) => !fieldMap[id].isComputed)
+      .filter((id) => fieldMap[id].type !== FieldType.Link);
     const data = opsData.map((data) => {
       const { recordId, updateParam, version } = data;
 
@@ -280,6 +445,9 @@ export class BatchService {
             (pre, [fieldId, value]) => {
               const field = fieldMap[fieldId];
               if (!field) {
+                return pre;
+              }
+              if (field.isComputed || field.type === FieldType.Link) {
                 return pre;
               }
               const { dbFieldName } = field;
@@ -301,11 +469,11 @@ export class BatchService {
       { dbFieldName: '__version', schemaType: SchemaType.Integer },
     ];
 
-    await this.batchUpdateDB(dbTableName, '__id', schemas, data);
+    await this.batchUpdateDB(dbTableName, '__id', schemas, data, tableId);
   }
 
   @Timing()
-  async saveRawOps(
+  saveRawOps(
     collectionId: string,
     opType: RawOpType,
     docType: IdPrefix,
@@ -324,7 +492,7 @@ export class BatchService {
 
     this.logger.verbose(`saveOp: ${baseRaw.src}-${collection}`);
 
-    const rawOps = dataList.map(({ docId: docId, version, data }) => {
+    dataList.forEach(({ docId, version, data }) => {
       let rawOp: IRawOp;
       if (opType === RawOpType.Create) {
         rawOp = {
@@ -348,56 +516,23 @@ export class BatchService {
           v: version,
         };
       } else {
-        throw new Error('unknown raw op type');
+        throw new CustomHttpException(
+          `unknown raw op type ${opType}`,
+          HttpErrorCode.VALIDATION_ERROR,
+          {
+            localization: {
+              i18nKey: 'httpErrors.custom.invalidOperation',
+            },
+          }
+        );
       }
       rawOpMap[collection][docId] = rawOp;
       return { rawOp, docId };
     });
 
-    await this.executeInsertOps(collectionId, docType, rawOps);
     const prevMap = this.cls.get('tx.rawOpMaps') || [];
     prevMap.push(rawOpMap);
     this.cls.set('tx.rawOpMaps', prevMap);
     return rawOpMap;
-  }
-
-  private async executeInsertOps(
-    collectionId: string,
-    docType: IdPrefix,
-    rawOps: { rawOp: IRawOp; docId: string }[]
-  ) {
-    const userId = this.cls.get('user.id');
-    const insertRowsData = rawOps
-      .filter(({ rawOp }) => !('del' in rawOp && rawOp.del))
-      .map(({ rawOp, docId }) => {
-        return {
-          collection: collectionId,
-          doc_type: docType,
-          doc_id: docId,
-          version: rawOp.v,
-          operation: JSON.stringify(rawOp),
-          created_by: userId,
-          created_time: new Date().toISOString(),
-        };
-      });
-
-    // delete history op when doc is deleted
-    const deleteIds = rawOps
-      .filter(({ rawOp }) => 'del' in rawOp && rawOp.del)
-      .map(({ docId }) => docId);
-
-    if (deleteIds.length) {
-      const deleteOpsSql = this.knex('ops')
-        .where('collection', collectionId)
-        .whereIn('doc_id', deleteIds)
-        .delete()
-        .toQuery();
-      await this.prismaService.txClient().$executeRawUnsafe(deleteOpsSql);
-    }
-
-    if (insertRowsData.length) {
-      const batchInsertOpsSql = this.dbProvider.batchInsertSql('ops', insertRowsData);
-      await this.prismaService.txClient().$executeRawUnsafe(batchInsertOpsSql);
-    }
   }
 }

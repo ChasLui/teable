@@ -10,7 +10,7 @@ export const shareViewCollaboratorsRoSchema = z.object({
   skip: z.coerce.number().optional(),
   take: z.coerce.number().optional(),
   search: z.string().optional(),
-  type: z.nativeEnum(PrincipalType).optional(),
+  type: z.enum(PrincipalType).optional(),
 });
 
 export type IShareViewCollaboratorsRo = z.infer<typeof shareViewCollaboratorsRoSchema>;
@@ -19,7 +19,10 @@ export const shareViewCollaboratorsVoSchema = z.array(
   z.object({
     userId: z.string(),
     userName: z.string(),
-    email: z.string(),
+    // Email is intentionally omitted for share (anonymous) responses to avoid
+    // leaking the member directory. Selection is by userId and display is by
+    // name/avatar, so email plays no role in the picker.
+    email: z.string().optional(),
     avatar: z.string().nullable().optional(),
   })
 );

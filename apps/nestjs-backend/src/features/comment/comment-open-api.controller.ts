@@ -16,11 +16,13 @@ import {
 import { ZodValidationPipe } from '../../zod.validation.pipe';
 import { AttachmentsStorageService } from '../attachments/attachments-storage.service';
 import StorageAdapter from '../attachments/plugins/adapter';
+import { AllowAnonymous } from '../auth/decorators/allow-anonymous.decorator';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { TqlPipe } from '../record/open-api/tql.pipe';
 import { CommentOpenApiService } from './comment-open-api.service';
 
 @Controller('api/comment/:tableId')
+@AllowAnonymous()
 export class CommentOpenApiController {
   constructor(
     private readonly commentOpenApiService: CommentOpenApiService,
@@ -28,7 +30,8 @@ export class CommentOpenApiController {
   ) {}
 
   @Get('/:recordId/count')
-  @Permissions('view|read')
+  // eslint-disable-next-line sonarjs/no-duplicate-string
+  @Permissions('record|read')
   async getRecordCommentCount(
     @Param('tableId') tableId: string,
     @Param('recordId') recordId: string
@@ -46,7 +49,6 @@ export class CommentOpenApiController {
   }
 
   @Get('/:recordId/attachment/:path')
-  // eslint-disable-next-line sonarjs/no-duplicate-string
   @Permissions('record|read')
   async getAttachmentPresignedUrl(@Param('path') path: string) {
     const [, token] = path.split('/');
@@ -101,8 +103,12 @@ export class CommentOpenApiController {
   // eslint-disable-next-line sonarjs/no-duplicate-string
   @Get('/:recordId/:commentId')
   @Permissions('record|read')
-  async getCommentDetail(@Param('commentId') commentId: string): Promise<ICommentVo | null> {
-    return this.commentOpenApiService.getCommentDetail(commentId);
+  async getCommentDetail(
+    @Param('tableId') tableId: string,
+    @Param('recordId') recordId: string,
+    @Param('commentId') commentId: string
+  ): Promise<ICommentVo | null> {
+    return this.commentOpenApiService.getCommentDetail(tableId, recordId, commentId);
   }
 
   @Patch('/:recordId/:commentId')
@@ -117,7 +123,8 @@ export class CommentOpenApiController {
   }
 
   @Delete('/:recordId/:commentId')
-  @Permissions('record|read')
+  // deleting your own comment is a comment operation, like editing it
+  @Permissions('record|comment')
   async deleteComment(
     @Param('tableId') tableId: string,
     @Param('recordId') recordId: string,

@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import multer from 'multer';
 import { StorageModule } from '../attachments/plugins/storage.module';
+import { RiskControlModule } from '../risk-control/risk-control.module';
+import { SettingModule } from '../setting/setting.module';
 import { LastVisitModule } from './last-visit/last-visit.module';
-import { UserInitService } from './user-init.service';
+import { TrackingModule } from './tracking/tracking.module';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 
@@ -14,9 +16,12 @@ import { UserService } from './user.service';
       storage: multer.diskStorage({}),
     }),
     StorageModule,
+    SettingModule,
+    RiskControlModule,
     LastVisitModule,
+    TrackingModule,
   ],
-  providers: [UserService, UserInitService],
+  providers: [UserService],
   exports: [UserService],
 })
 export class UserModule {}

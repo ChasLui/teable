@@ -5,7 +5,7 @@ import { useTableHref } from './useTableHref';
 export const NoDraggableList: React.FC = () => {
   const tables = useTables();
   const tableId = useTableId();
-  const tableHrefMap = useTableHref();
+  const { hrefMap: tableHrefMap } = useTableHref();
 
   return (
     <ul>
@@ -15,6 +15,7 @@ export const NoDraggableList: React.FC = () => {
             table={table}
             href={tableHrefMap[table.id]}
             isActive={table.id === tableId}
+            className="cursor-pointer"
           />
         </li>
       ))}

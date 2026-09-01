@@ -1,7 +1,8 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { HttpErrorCode } from '@teable/core';
+import type { Request } from 'express';
 import { Strategy } from 'passport-local';
 import { CacheService } from '../../../cache/cache.service';
 import { AuthConfig, IAuthConfig } from '../../../configs/auth.config';
@@ -21,20 +22,42 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
     super({
       usernameField: 'email',
       passwordField: 'password',
+      passReqToCallback: true,
     });
   }
 
-  async validate(email: string, password: string) {
+  async validate(req: Request, email: string, password: string) {
     try {
-      const user = await this.authService.validateUserByEmail(email, password);
+      const turnstileToken = req.body?.turnstileToken;
+      const remoteIp =
+        req.ip || req.connection.remoteAddress || (req.headers['x-forwarded-for'] as string);
+      const user = await this.authService.validateUserByEmailWithTurnstile(
+        email,
+        password,
+        turnstileToken,
+        remoteIp
+      );
       if (!user) {
         throw new CustomHttpException(
           'Email or password is incorrect',
-          HttpErrorCode.INVALID_CREDENTIALS
+          HttpErrorCode.INVALID_CREDENTIALS,
+          {
+            localization: {
+              i18nKey: 'httpErrors.auth.emailOrPasswordIncorrect',
+            },
+          }
         );
       }
       if (user.deactivatedTime) {
-        throw new BadRequestException('Your account has been deactivated by the administrator');
+        throw new CustomHttpException(
+          `Your account has been deactivated by the administrator`,
+          HttpErrorCode.VALIDATION_ERROR,
+          {
+            localization: {
+              i18nKey: 'httpErrors.auth.accountDeactivated',
+            },
+          }
+        );
       }
       await this.userService.refreshLastSignTime(user.id);
       return pickUserMe(user);
@@ -44,8 +67,13 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
       const isLockout = await this.cacheService.get(`signin:lockout:${email}`);
       if (!hasLockout) {
         throw new CustomHttpException(
-          'Email or password is incorrect',
-          HttpErrorCode.INVALID_CREDENTIALS
+          `Email or password is incorrect`,
+          HttpErrorCode.INVALID_CREDENTIALS,
+          {
+            localization: {
+              i18nKey: 'httpErrors.auth.emailOrPasswordIncorrect',
+            },
+          }
         );
       }
       const lockError = new CustomHttpException(
@@ -53,24 +81,29 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
         HttpErrorCode.TOO_MANY_REQUESTS,
         {
           minutes: accountLockoutMinutes,
+          localization: {
+            i18nKey: 'httpErrors.auth.accountLockedOut',
+          },
         }
       );
       if (isLockout) {
         throw lockError;
       }
-      const count = await this.cacheService.get(`signin:attempts:${email}`);
-      if (count && count >= maxLoginAttempts) {
+      // Use atomic increment to prevent race conditions
+      const attempts = await this.cacheService.incr(`signin:attempts:${email}`, 30);
+      if (attempts >= maxLoginAttempts) {
         await this.cacheService.set(`signin:lockout:${email}`, true, accountLockoutMinutes);
-        await this.cacheService.del(`signin:attempts:${email}`);
+        await this.cacheService.expire(`signin:attempts:${email}`, 1);
         throw lockError;
       }
-      const attempts = (count || 0) + 1;
-      await this.cacheService.setDetail(`signin:attempts:${email}`, attempts, 30);
       throw new CustomHttpException(
         'Email or password is incorrect',
         HttpErrorCode.INVALID_CREDENTIALS,
         {
           attempts,
+          localization: {
+            i18nKey: 'httpErrors.auth.emailOrPasswordIncorrect',
+          },
         }
       );
     }

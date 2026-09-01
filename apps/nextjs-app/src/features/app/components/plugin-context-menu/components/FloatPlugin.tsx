@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Rnd } from 'react-rnd';
 import { PluginContent } from '@/features/app/components/plugin/PluginContent';
 import { useFloatPluginPosition } from './useFloatPluginPosition';
+import { toPixel } from './utils/position';
 
 export const FloatPlugin = (props: {
   name: string;
@@ -52,17 +53,30 @@ export const FloatPlugin = (props: {
     };
   }, [position, updatePosition]);
 
+  // Convert position values to pixels (handles both 0-1 percentage and >1 pixel values)
+  const positionInPixels = {
+    x: toPixel(position.x, bodySize.width),
+    y: toPixel(position.y, bodySize.height),
+    width: toPixel(position.width, bodySize.width),
+    height: toPixel(position.height, bodySize.height),
+  };
+
   const x =
-    position.x + position.width > bodySize.width
-      ? Math.max(0, bodySize.width - position.width)
-      : position.x;
+    positionInPixels.x + positionInPixels.width > bodySize.width
+      ? Math.max(0, bodySize.width - positionInPixels.width)
+      : positionInPixels.x;
   const y =
-    position.y + position.height > bodySize.height
-      ? Math.max(0, bodySize.height - position.height)
-      : position.y;
-  const width = position.width > bodySize.width ? Math.max(120, bodySize.width) : position.width;
+    positionInPixels.y + positionInPixels.height > bodySize.height
+      ? Math.max(0, bodySize.height - positionInPixels.height)
+      : positionInPixels.y;
+  const width =
+    positionInPixels.width > bodySize.width
+      ? Math.max(120, bodySize.width)
+      : positionInPixels.width;
   const height =
-    position.height > bodySize.height ? Math.max(90, bodySize.height) : position.height;
+    positionInPixels.height > bodySize.height
+      ? Math.max(90, bodySize.height)
+      : positionInPixels.height;
 
   return createPortal(
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
@@ -83,7 +97,7 @@ export const FloatPlugin = (props: {
       dragHandleClassName="float-plugin-drag-handle"
       resizeHandleClasses={{
         bottomRight:
-          'border-b border-r border-foreground/40 after:absolute after:size-2 after:border-b-2 after:border-r-2 after:border-b after:border-r after:border-primary',
+          'border-b border-e border-foreground/40 after:absolute after:size-2 after:border-b-2 after:border-e-2 after:border-b after:border-e after:border-primary',
       }}
       minHeight={90}
       minWidth={120}
@@ -91,6 +105,7 @@ export const FloatPlugin = (props: {
         bottomRight: !frozenResize,
       }}
       bounds={'parent'}
+      onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
       onDrag={() => {
         setIsDragging(true);
       }}
@@ -100,16 +115,18 @@ export const FloatPlugin = (props: {
       onResizeStop={(_e, _direction, ref, _delta, position) => {
         setIsDragging(false);
         updatePosition({
-          ...position,
+          x: position.x,
+          y: position.y,
           width: ref.offsetWidth,
           height: ref.offsetHeight,
         });
       }}
       onDragStop={(_e, d) => {
         updatePosition({
-          ...position,
           x: d.x,
           y: d.y,
+          width: positionInPixels.width,
+          height: positionInPixels.height,
         });
         setIsDragging(false);
       }}
@@ -122,10 +139,10 @@ export const FloatPlugin = (props: {
             {!frozenDrag && (
               <DragHandleDots2Icon className="float-plugin-drag-handle inline-block size-4 shrink-0 cursor-move" />
             )}
-            <div className={cn('truncate', { 'ml-2': frozenDrag })}>{name}</div>
+            <div className={cn('truncate', { 'ms-2': frozenDrag })}>{name}</div>
           </div>
           <Button variant="link" size="icon" onClick={onClose}>
-            <X />
+            <X className="size-4 shrink-0" />
           </Button>
         </div>
         <PluginContent
@@ -138,9 +155,12 @@ export const FloatPlugin = (props: {
           pluginUrl={pluginUrl}
           positionType={PluginPosition.ContextMenu}
           dragging={isDragging}
+          iframeAttributes={{
+            loading: 'eager',
+          }}
         />
       </div>
     </Rnd>,
     document.body
-  );
+  ) as unknown as JSX.Element;
 };

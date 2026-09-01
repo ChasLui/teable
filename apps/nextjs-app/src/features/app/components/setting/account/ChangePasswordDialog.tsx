@@ -15,8 +15,8 @@ import {
   DialogTrigger,
   Input,
   Label,
-  useToast,
 } from '@teable/ui-lib/shadcn';
+import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { useState } from 'react';
@@ -29,7 +29,6 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
   const { t } = useTranslation('common');
   const router = useRouter();
   const { user } = useSession();
-  const { toast } = useToast();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -37,12 +36,12 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
 
   const {
     mutate: changePasswordMutate,
-    isLoading,
+    isPending: isLoading,
     isSuccess,
-  } = useMutation(changePassword, {
+  } = useMutation({
+    mutationFn: changePassword,
     onSuccess: () => {
-      toast({
-        title: t('settings.account.changePasswordSuccess.title'),
+      toast.success(t('settings.account.changePasswordSuccess.title'), {
         description: t('settings.account.changePasswordSuccess.desc'),
       });
       setTimeout(() => {
@@ -89,12 +88,12 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
   return (
     <Dialog onOpenChange={reset}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="md:w-80">
+      <DialogContent className="md:w-[400px]">
         <DialogHeader>
-          <DialogTitle className="text-center text-sm">
+          <DialogTitle className="text-base">
             {t('settings.account.changePassword.title')}
           </DialogTitle>
-          <DialogDescription className="text-center text-xs">
+          <DialogDescription className="text-sm">
             {t('settings.account.changePassword.desc')}
           </DialogDescription>
         </DialogHeader>
@@ -108,11 +107,11 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
               readOnly
               value={user.email}
             />
-            <Label className="text-xs text-muted-foreground" htmlFor="currentPassword">
+            <Label className="font-normal text-foreground" htmlFor="currentPassword">
               {t('settings.account.changePassword.current')}
             </Label>
             <Input
-              className="h-7"
+              size="sm"
               id="currentPassword"
               autoComplete="current-password"
               type="password"
@@ -122,11 +121,11 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground" htmlFor="newPassword">
+            <Label className="font-normal text-foreground" htmlFor="newPassword">
               {t('settings.account.changePassword.new')}
             </Label>
             <Input
-              className="h-7"
+              size="sm"
               id="newPassword"
               autoComplete="new-password"
               type="password"
@@ -137,11 +136,11 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground" htmlFor="confirmPassword">
+            <Label className="font-normal text-foreground" htmlFor="confirmPassword">
               {t('settings.account.changePassword.confirm')}
             </Label>
             <Input
-              className="h-7"
+              size="sm"
               id="confirmPassword"
               autoComplete="new-password"
               type="password"
@@ -151,24 +150,24 @@ export const ChangePasswordDialog = (props: IChangePasswordDialogProps) => {
               aria-autocomplete="inline"
             />
           </div>
-          {error && <div className="text-center text-xs text-red-500">{error}</div>}
+          {error && <div className="!mt-4 text-xs text-destructive">{error}</div>}
         </div>
-        <DialogFooter className="flex-col space-y-2 sm:flex-col sm:space-x-0">
+        <DialogFooter className="flex flex-col gap-2 sm:flex-row">
+          <DialogClose asChild>
+            <Button size={'sm'} className="w-full" variant={'outline'}>
+              {t('actions.cancel')}
+            </Button>
+          </DialogClose>
           <Button
             size={'sm'}
-            className="w-full"
+            className="m-0 w-full"
             type="submit"
             disabled={disableSubmitBtn || isSuccess || isLoading}
             onClick={handleSubmit}
           >
-            {isLoading && <Spin className="mr-1 size-4" />}
+            {isLoading && <Spin className="me-1 size-4" />}
             {t('settings.account.changePassword.title')}
           </Button>
-          <DialogClose asChild>
-            <Button size={'sm'} className="w-full" variant={'ghost'}>
-              {t('actions.cancel')}
-            </Button>
-          </DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

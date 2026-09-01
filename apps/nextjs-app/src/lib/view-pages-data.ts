@@ -3,33 +3,32 @@ import type { IGroupPointsVo, ITableVo } from '@teable/openapi';
 import type { SsrApi } from '@/backend/api/rest/ssr-api';
 
 export interface IViewPageProps {
-  tableServerData: ITableVo[];
+  tableServerData?: ITableVo[];
   fieldServerData: IFieldVo[];
   viewServerData: IViewVo[];
   recordsServerData: { records: IRecord[] };
   recordServerData?: IRecord;
-  groupPointsServerDataMap?: { [viewId: string]: IGroupPointsVo | undefined };
+  groupPointsServerDataMap?: { [viewId: string]: IGroupPointsVo | null };
 }
 
 export const getViewPageServerData = async (
   ssrApi: SsrApi,
   baseId: string,
   tableId: string,
-  viewId: string
+  viewId: string,
+  preloadedViews?: IViewVo[]
 ): Promise<IViewPageProps | undefined> => {
   const api = ssrApi;
-  const tableResult = await api.getTable(baseId, tableId, viewId);
+  const tableResult = await api.getTable(baseId, tableId, viewId, preloadedViews);
   if (tableResult) {
-    const tablesResult = await api.getTables(baseId);
     const { fields, views, records, extra } = tableResult;
 
     return {
-      tableServerData: tablesResult,
       fieldServerData: fields,
       viewServerData: views,
       recordsServerData: { records },
       groupPointsServerDataMap: {
-        [viewId]: extra?.groupPoints,
+        [viewId]: extra?.groupPoints ?? null,
       },
     };
   }

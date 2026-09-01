@@ -33,6 +33,7 @@ export const useKeyboardSelection = (props: ISelectionKeyboardProps) => {
     onRowExpand,
     editorRef,
     scrollBy,
+    disableEnterMoveDown,
   } = props;
   const { pureRowCount, columnCount } = coordInstance;
 
@@ -171,12 +172,12 @@ export const useKeyboardSelection = (props: ISelectionKeyboardProps) => {
   );
 
   useHotkeys(
-    ['del', 'backspace', 'f2'],
+    ['delete', 'backspace', 'f2'],
     () => {
       if (isHotkeyPressed('f2')) {
         return setEditing(true);
       }
-      if (isHotkeyPressed('backspace') || isHotkeyPressed('del')) {
+      if (isHotkeyPressed('backspace') || isHotkeyPressed('delete')) {
         return onDelete?.(selection);
       }
     },
@@ -198,7 +199,10 @@ export const useKeyboardSelection = (props: ISelectionKeyboardProps) => {
           range = [range[0], 0];
         }
         const [columnIndex, rowIndex] = range;
-        const nextRowIndex = Math.min(rowIndex + 1, pureRowCount - 1);
+        // Stay on the edited cell so the caller can follow a record that re-positions on edit.
+        const nextRowIndex = disableEnterMoveDown
+          ? rowIndex
+          : Math.min(rowIndex + 1, pureRowCount - 1);
         const newRange = [columnIndex, nextRowIndex] as IRange;
         editorRef.current?.saveValue?.();
         setTimeout(() => {

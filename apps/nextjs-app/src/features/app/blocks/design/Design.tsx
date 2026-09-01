@@ -1,21 +1,25 @@
 import { AnchorContext, TablePermissionProvider } from '@teable/sdk/context';
 import { Button, Separator } from '@teable/ui-lib/shadcn';
 import { ChevronLeft } from 'lucide-react';
+import Head from 'next/head';
+import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
+import { useBaseResource } from '../../hooks/useBaseResource';
 import { DbConnectionPanel } from '../db-connection/Panel';
 import { BaseDetail } from './BaseDetail';
 import { TableTabs } from './TableTabs';
 
 export const Design = () => {
   const router = useRouter();
-  const baseId = router.query.baseId as string;
-  const tableId = router.query.tableId as string | undefined;
-  const { t } = useTranslation(['table']);
+  const { baseId } = useBaseResource();
+  const searchParams = useSearchParams();
+  const tableId = searchParams.get('tableId') ?? '';
+  const { t } = useTranslation(['table', 'common']);
 
   const handleBack = () => {
     if (tableId) {
-      router.push(`/base/${baseId}/${tableId}`);
+      router.push(`/base/${baseId}/table/${tableId}`);
     } else {
       router.push(`/base/${baseId}`);
     }
@@ -26,12 +30,15 @@ export const Design = () => {
       <TablePermissionProvider baseId={baseId}>
         <div className="h-screen overflow-y-auto bg-background">
           {/* Header */}
+          <Head>
+            <title>{t('common:noun.design')}</title>
+          </Head>
           <div className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="flex items-center gap-2 px-4 py-1">
               <Button variant="ghost" size="icon" onClick={handleBack}>
                 <ChevronLeft className="size-4" />
               </Button>
-              <h1 className="text-lg font-semibold">{t('table:table.design')}</h1>
+              <h1 className="text-lg font-semibold">{t('common:noun.design')}</h1>
             </div>
           </div>
 
@@ -42,7 +49,7 @@ export const Design = () => {
               <BaseDetail />
 
               {/* Connection Info */}
-              <DbConnectionPanel />
+              <DbConnectionPanel className="overflow-hidden" />
             </div>
 
             <Separator />

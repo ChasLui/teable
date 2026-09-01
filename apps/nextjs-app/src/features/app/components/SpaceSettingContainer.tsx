@@ -1,8 +1,13 @@
+import { cn } from '@teable/ui-lib/shadcn';
+
 interface SpaceSettingContainerProps {
   title: string;
-  description?: string;
+  description?: string | React.ReactElement;
   className?: string;
   children: React.ReactNode | React.ReactNode[];
+  headerClassName?: string;
+  wrapperClassName?: string;
+  titleClassName?: string;
 }
 
 export const SpaceSettingContainer = ({
@@ -10,15 +15,20 @@ export const SpaceSettingContainer = ({
   description,
   className,
   children,
+  headerClassName,
+  wrapperClassName,
+  titleClassName,
 }: SpaceSettingContainerProps) => {
   return (
-    <div className="h-screen w-full overflow-y-auto overflow-x-hidden">
-      <div className="w-full px-8 py-6">
-        <div className="border-b pb-4">
-          <h1 className="text-3xl font-semibold">{title}</h1>
-          {description && <div className="mt-3 text-sm text-slate-500">{description}</div>}
+    <div className={cn('h-full w-full', wrapperClassName)}>
+      <div className={cn('h-full w-full flex flex-col p-4 sm:p-6', headerClassName)}>
+        <div className={cn('pb-6', titleClassName)}>
+          <p className="text-lg font-semibold">{title}</p>
+          {description && <div className="mt-1 text-sm text-muted-foreground">{description}</div>}
         </div>
-        <div className={className}>{children}</div>
+        <div className={cn('overflow-y-auto flex flex-col flex-1 gap-6', className)}>
+          {children}
+        </div>
       </div>
     </div>
   );

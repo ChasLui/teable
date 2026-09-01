@@ -3,6 +3,7 @@ import { Database } from '@teable/icons';
 import type { IGetBaseVo, IGetSpaceVo } from '@teable/openapi';
 import { updateTemplate } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
+import { useContentDir } from '@teable/sdk/hooks';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ interface IBaseSelectPanelProps {
 export const BaseSelectPanel = (props: IBaseSelectPanelProps) => {
   const { baseId, baseList, templateId, spaceList, disabled } = props;
   const { t } = useTranslation('common');
+  const contentDir = useContentDir();
   const [open, setOpen] = useState(false);
 
   const queryClient = useQueryClient();
@@ -50,7 +52,7 @@ export const BaseSelectPanel = (props: IBaseSelectPanelProps) => {
   const { mutateAsync: updateTemplateFn } = useMutation({
     mutationFn: (baseId: string) => updateTemplate(templateId, { baseId }),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.templateList());
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.templateList() });
       setOpen(false);
     },
   });
@@ -84,8 +86,22 @@ export const BaseSelectPanel = (props: IBaseSelectPanelProps) => {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size={'xs'} className="min-w-24" disabled={disabled}>
-          {baseName}
+        <Button
+          variant="outline"
+          size={'xs'}
+          className={cn('w-32 overflow-hidden truncate', {
+            'border-red-500': !baseName,
+          })}
+          disabled={disabled}
+        >
+          <span
+            className={cn('truncate', {
+              'text-red-500': !baseName,
+            })}
+            title={baseName ?? t('settings.templateAdmin.baseSelectPanel.abnormalBase')}
+          >
+            {baseName ?? t('settings.templateAdmin.baseSelectPanel.abnormalBase')}
+          </span>
         </Button>
       </DialogTrigger>
       <DialogContent className="flex h-[550px] min-w-[750px] flex-col">
@@ -99,7 +115,6 @@ export const BaseSelectPanel = (props: IBaseSelectPanelProps) => {
           placeholder={t('settings.templateAdmin.baseSelectPanel.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8"
         />
         <div className="w-full flex-1 flex-col overflow-y-auto">
           <div className="flex w-full flex-col gap-2">
@@ -117,7 +132,7 @@ export const BaseSelectPanel = (props: IBaseSelectPanelProps) => {
                       onClick={() => updateTemplateFn(base.id)}
                     >
                       <span className="shrink-0">{base.icon ?? <Database />}</span>
-                      <span className="truncate" title={base.name}>
+                      <span dir={contentDir} className="truncate" title={base.name}>
                         {base.name}
                       </span>
                     </Button>

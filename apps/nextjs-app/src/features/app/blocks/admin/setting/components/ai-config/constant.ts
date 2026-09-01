@@ -10,7 +10,32 @@ import {
   Qwen,
   Zhipu,
   Xai,
+  Ollama,
+  AmazonBedrock,
+  OpenRouter,
+  Zap,
+  // Gateway provider icons
+  Meta,
+  Moonshot,
+  Perplexity,
+  Nvidia,
+  Minimax,
+  Vercel,
+  Voyage,
+  Bfl,
+  Bytedance,
+  Xiaomi,
+  Meituan,
+  Kwaipilot,
+  ArceeAi,
+  PrimeIntellect,
+  Morph,
+  Inception,
+  Stealth,
+  Prodia,
+  Recraft,
 } from '@teable/icons';
+import type { GatewayModelProvider } from '@teable/openapi';
 import { LLMProviderType } from '@teable/openapi';
 
 export const LLM_PROVIDER_ICONS = {
@@ -25,36 +50,54 @@ export const LLM_PROVIDER_ICONS = {
   [LLMProviderType.ZHIPU]: Zhipu,
   [LLMProviderType.LINGYIWANWU]: Lingyiwanwu,
   [LLMProviderType.XAI]: Xai,
+  [LLMProviderType.TOGETHERAI]: Openai,
+  [LLMProviderType.OLLAMA]: Ollama,
+  [LLMProviderType.AMAZONBEDROCK]: AmazonBedrock,
+  [LLMProviderType.OPENROUTER]: OpenRouter,
+  [LLMProviderType.OPENAI_COMPATIBLE]: Openai,
+  [LLMProviderType.AI_GATEWAY]: Zap, // AI Gateway uses Zap icon
 };
 
-export const LLM_PROVIDERS = [
+type LLMProviderOption = {
+  value: LLMProviderType;
+  label: string;
+  baseUrlPlaceholder: string;
+  modelsPlaceholder: string;
+  apiKeyPlaceholder?: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  hideInProviderSelect?: boolean;
+};
+
+export const LLM_PROVIDERS: readonly LLMProviderOption[] = [
   {
     value: LLMProviderType.DEEPSEEK,
     label: 'DeepSeek',
     baseUrlPlaceholder: 'https://api.deepseek.ai/v1',
-    modelsPlaceholder: 'deepseek-chat,deepseek-reasoner,deepseek-coder',
+    modelsPlaceholder: 'deepseek-chat,deepseek-reasoner',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.DEEPSEEK],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.OPENAI,
     label: 'OpenAI',
     baseUrlPlaceholder: 'https://api.openai.com/v1',
-    modelsPlaceholder: 'gpt-4,gpt-4o-mini,gpt-3.5-turbo',
+    modelsPlaceholder: 'gpt-5.5,o3,gpt-5-mini',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.OPENAI],
   },
   {
     value: LLMProviderType.ANTHROPIC,
     label: 'Anthropic',
-    baseUrlPlaceholder: 'https://api.anthropic.com',
-    modelsPlaceholder: 'claude-3-opus-20240229,claude-3-5-sonnet-20241022',
+    baseUrlPlaceholder: 'https://api.anthropic.com/v1',
+    modelsPlaceholder: 'claude-fable-5,claude-opus-4-8,claude-sonnet-5',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.ANTHROPIC],
   },
   {
     value: LLMProviderType.GOOGLE,
     label: 'Google',
-    baseUrlPlaceholder: 'https://generativelanguage.googleapis.com',
-    modelsPlaceholder: 'gemini-pro-vision,gemini-1.5-flash-002',
+    baseUrlPlaceholder: 'https://generativelanguage.googleapis.com/v1beta',
+    modelsPlaceholder: 'gemini-3-flash-preview,gemini-2.5-pro',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.GOOGLE],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.AZURE,
@@ -62,6 +105,7 @@ export const LLM_PROVIDERS = [
     baseUrlPlaceholder: 'https://{your-resource-name}.openai.azure.com',
     modelsPlaceholder: 'gpt-4,gpt-35-turbo',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.AZURE],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.COHERE,
@@ -69,20 +113,23 @@ export const LLM_PROVIDERS = [
     baseUrlPlaceholder: 'https://api.cohere.ai/v1',
     modelsPlaceholder: 'command-r,command-r-plus,command-r-plus-online',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.COHERE],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.MISTRAL,
     label: 'Mistral',
     baseUrlPlaceholder: 'https://api.mistral.ai/v1',
-    modelsPlaceholder: 'mistral-large-latest,open-mistral-nemo',
+    modelsPlaceholder: 'mistral-large-latest,codestral-latest',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.MISTRAL],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.QWEN,
     label: 'Qwen',
     baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    modelsPlaceholder: 'qwen-plus,qwen-plus,qwen-max',
+    modelsPlaceholder: 'qwen3.5-plus,qwen3-max',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.QWEN],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.ZHIPU,
@@ -90,6 +137,7 @@ export const LLM_PROVIDERS = [
     baseUrlPlaceholder: 'https://open.bigmodel.cn/api/paas/v4',
     modelsPlaceholder: 'glm-3-turbo,glm-4,glm-4-air',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.ZHIPU],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.LINGYIWANWU,
@@ -97,12 +145,93 @@ export const LLM_PROVIDERS = [
     baseUrlPlaceholder: 'https://api.lingyiwanwu.com/v1',
     modelsPlaceholder: 'yi-lightning,yi-large',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.LINGYIWANWU],
+    hideInProviderSelect: true,
   },
   {
     value: LLMProviderType.XAI,
     label: 'XAI',
     baseUrlPlaceholder: 'https://api.x.ai/v1',
-    modelsPlaceholder: 'grok-2,grok-3,grok-3-reasoner',
+    modelsPlaceholder: 'grok-4-1-fast,grok-3-beta',
     Icon: LLM_PROVIDER_ICONS[LLMProviderType.XAI],
+    hideInProviderSelect: true,
+  },
+  {
+    value: LLMProviderType.TOGETHERAI,
+    label: 'TogetherAI',
+    baseUrlPlaceholder: 'https://api.together.xyz/v1',
+    modelsPlaceholder: 'deepseek-ai/DeepSeek-R1,meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+    Icon: LLM_PROVIDER_ICONS[LLMProviderType.TOGETHERAI],
+    hideInProviderSelect: true,
+  },
+  {
+    value: LLMProviderType.OLLAMA,
+    label: 'Ollama',
+    baseUrlPlaceholder: 'http://localhost:11434',
+    modelsPlaceholder: 'deepseek-r1,qwen3:8b,llama4:8b',
+    Icon: LLM_PROVIDER_ICONS[LLMProviderType.OLLAMA],
+    hideInProviderSelect: true,
+  },
+  {
+    value: LLMProviderType.AMAZONBEDROCK,
+    label: 'Amazon Bedrock',
+    baseUrlPlaceholder: 'https://bedrock-runtime.us-east-1.amazonaws.com',
+    modelsPlaceholder: 'amazon.titan-embed-image-v1,amazon.titan-embed-text-v1',
+    apiKeyPlaceholder: 'REGION.ACCESS_KEY_ID.SECRET_ACCESS_KEY',
+    Icon: LLM_PROVIDER_ICONS[LLMProviderType.AMAZONBEDROCK],
+    hideInProviderSelect: true,
+  },
+  {
+    value: LLMProviderType.OPENROUTER,
+    label: 'OpenRouter',
+    baseUrlPlaceholder: 'https://openrouter.ai/api/v1',
+    modelsPlaceholder: 'anthropic/claude-sonnet-4-6,google/gemini-2.5-flash',
+    Icon: LLM_PROVIDER_ICONS[LLMProviderType.OPENROUTER],
+    hideInProviderSelect: true,
+  },
+  {
+    value: LLMProviderType.OPENAI_COMPATIBLE,
+    label: 'OpenAI Compatible',
+    baseUrlPlaceholder: 'https://api.openai.com/v1',
+    modelsPlaceholder: 'gpt-5.5,gpt-5.4,o3,gpt-5-mini',
+    Icon: LLM_PROVIDER_ICONS[LLMProviderType.OPENAI_COMPATIBLE],
   },
 ] as const;
+
+// Gateway provider icons (owned_by field from AI Gateway API)
+export const GATEWAY_PROVIDER_ICONS: Record<
+  GatewayModelProvider,
+  React.ComponentType<{ className?: string }>
+> = {
+  alibaba: Qwen,
+  amazon: AmazonBedrock,
+  anthropic: Anthropic,
+  'arcee-ai': ArceeAi,
+  bfl: Bfl,
+  bytedance: Bytedance,
+  cohere: Cohere,
+  deepseek: Deepseek,
+  google: GoogleLogo,
+  inception: Inception,
+  interfaze: Zap,
+  kwaipilot: Kwaipilot,
+  meituan: Meituan,
+  meta: Meta,
+  minimax: Minimax,
+  mistral: Mistral,
+  moonshotai: Moonshot,
+  morph: Morph,
+  nvidia: Nvidia,
+  openai: Openai,
+  perplexity: Perplexity,
+  'prime-intellect': PrimeIntellect,
+  prodia: Prodia,
+  recraft: Recraft,
+  sakana: Zap,
+  stealth: Stealth,
+  stepfun: Zap,
+  vercel: Vercel,
+  voyage: Voyage,
+  xai: Xai,
+  xiaomi: Xiaomi,
+  zai: Zhipu,
+};

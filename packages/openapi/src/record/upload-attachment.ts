@@ -20,13 +20,13 @@ export const UploadAttachmentRoute: RouteConfig = registerRoute({
     params: z.object({
       tableId: z.string(),
       recordId: z.string(),
-      fieldId: z.string().openapi({ description: 'ID of an attachment field' }),
+      fieldId: z.string().meta({ description: 'ID of an attachment field' }),
     }),
     body: {
       content: {
         'multipart/form-data': {
           schema: z.object({
-            file: z.any().optional().openapi({ type: 'string', format: 'binary' }),
+            file: z.any().optional().meta({ type: 'string', format: 'binary' }),
             fileUrl: z.string().optional(),
           }),
         },
@@ -52,14 +52,15 @@ export const uploadAttachment = async (
   tableId: string,
   recordId: string,
   fieldId: string,
-  file?: Buffer | ReadStream | string
+  file?: Buffer | ReadStream | string,
+  options?: FormData.AppendOptions | string
 ) => {
   const formData = new FormData();
 
   if (typeof file === 'string') {
     formData.append('fileUrl', file);
   } else if (file) {
-    formData.append('file', file);
+    formData.append('file', file, options);
   }
 
   return axios.post<IRecord>(
@@ -69,6 +70,8 @@ export const uploadAttachment = async (
       headers: {
         ...formData.getHeaders(),
       },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
     }
   );
 };

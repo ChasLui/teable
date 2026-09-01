@@ -49,6 +49,12 @@ describe('CollaboratorService', () => {
           user: mockUser,
           tx: {},
           permissions: getPermissions(Role.Owner),
+          origin: {
+            ip: '127.0.0.1',
+            byApi: false,
+            userAgent: 'test',
+            referer: 'test',
+          },
         },
         async () => {
           await collaboratorService.createSpaceCollaborator({
@@ -76,7 +82,7 @@ describe('CollaboratorService', () => {
           resourceType: CollaboratorType.Base,
         },
       });
-      expect(prismaService.$executeRawUnsafe).toBeCalled();
+      expect(prismaService.collaborator.createMany).toBeCalled();
     });
 
     it('should throw error if exists', async () => {
@@ -93,7 +99,7 @@ describe('CollaboratorService', () => {
           role: Role.Owner,
           spaceId: mockSpace.id,
         })
-      ).rejects.toThrow('has already existed in space');
+      ).rejects.toThrow('Collaborator has already existed in space');
     });
   });
 });

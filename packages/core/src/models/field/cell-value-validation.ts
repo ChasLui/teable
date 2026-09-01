@@ -4,6 +4,7 @@ import { FieldType } from './constant';
 import {
   attachmentCellValueSchema,
   autoNumberCellValueSchema,
+  buttonFieldCelValueSchema,
   dataFieldCellValueSchema,
   getFormulaCellValueSchema,
   linkCellValueSchema,
@@ -49,14 +50,13 @@ export const validateCellValue = (field: IFieldVo, cellValue: unknown) => {
     case FieldType.LastModifiedBy:
       return validateWithSchema(userCellValueSchema, cellValue);
     case FieldType.Rollup:
+    case FieldType.ConditionalRollup:
     case FieldType.Formula: {
       const schema = getFormulaCellValueSchema(cellValueType);
       return validateWithSchema(schema, cellValue);
     }
     case FieldType.Button:
-    case FieldType.Count:
-    case FieldType.Duration:
-      throw new Error('did not implement yet');
+      return validateWithSchema(buttonFieldCelValueSchema, cellValue);
     default:
       assertNever(type);
   }

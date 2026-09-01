@@ -17,25 +17,28 @@ corepack enable
 pnpm install
 ```
 
-### 2. Database Selection
-We support SQLite (dev only) and PostgreSQL. PostgreSQL is recommended and requires Docker installed.
+### 2. Database Setup
+
+Teable uses PostgreSQL for development and requires Docker installed.
 
 ```bash
-# Switch between SQLite and PostgreSQL
 make switch-db-mode
 ```
 
 ### 3. Environment Configuration (Optional)
+
 ```bash
 cd apps/nextjs-app
 cp .env.development .env.development.local
 ```
 
 ### 4. Start Development Server
+
 ```bash
 cd apps/nestjs-backend
 pnpm dev
 ```
+
 This will automatically start both backend and frontend servers with hot reload enabled.
 
 ## Continuous Development
@@ -64,17 +67,21 @@ Teable uses Prisma as ORM for database management. Follow these steps for schema
 1. Modify `packages/db-main-prisma/prisma/template.prisma`
 
 2. Generate Prisma schemas:
+
 ```bash
 make gen-prisma-schema
 ```
-This generates both SQLite and PostgreSQL schemas and TypeScript definitions.
+
+This generates the PostgreSQL schema and TypeScript definitions.
 
 3. Create migrations file:
+
 ```bash
 make db-migration
 ```
 
 4. Apply migrations:
+
 ```bash
 make switch-db-mode
 ```
@@ -85,6 +92,7 @@ make switch-db-mode
 ## Testing
 
 ### E2E Tests
+
 Located in `apps/nestjs-backend`:
 
 ```bash
@@ -99,6 +107,7 @@ pnpm test-e2e [test-file]
 ```
 
 ### Unit Tests
+
 ```bash
 # Run all unit tests
 pnpm g:test-unit
@@ -112,13 +121,16 @@ pnpm test-unit [test-file]
 ```
 
 ### IDE Integration
+
 Using VSCode/Cursor:
+
 1. For E2E tests in `apps/nestjs-backend`:
+
    - Switch to test file (e.g. `apps/nestjs-backend/test/record.e2e-spec.ts`)
    - Select "vitest e2e nest backend" in Debug panel
 
 2. For unit tests in different packages:
-   - For `packages/core`: 
+   - For `packages/core`:
      - Switch to test file (e.g. `packages/core/src/utils/date.spec.ts`)
      - Select "vitest core" in Debug panel
    - For other packages, select their corresponding debug configuration
@@ -130,6 +142,7 @@ Each package has its own debug configuration in VSCode/Cursor, make sure to sele
 This repo follows [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format.
 
 ### Common Prefixes
+
 - **feat**: New feature
 - **fix**: Bug fix
 - **docs**: Documentation changes
@@ -145,11 +158,10 @@ This repo follows [conventional commit](https://www.conventionalcommits.org/en/v
 
 ### Building Images Locally
 
-We have two main Docker images:
 - `teable`: The main application image
-- `teable-db-migrate`: Database migration tool (one-time setup tool)
 
 #### Build the Application Image
+
 > **Note**
 > You should run this command in the root directory.
 
@@ -161,27 +173,15 @@ docker build -f dockers/teable/Dockerfile -t teable:latest .
 docker build --platform linux/amd64 -f dockers/teable/Dockerfile -t teable:latest .
 ```
 
-#### Build the Migration Tool Image
-
-```bash
-# Build the database migration image
-docker build -f dockers/teable/Dockerfile.db-migrate -t teable-db-migrate:latest .
-```
-
-> **Important**
-> The `teable-db-migrate` image is used for database schema migrations. It should be run once before starting the main application. The container will automatically exit after completing the migrations.
-
 ### Pushing to Docker Hub
 
 ```bash
 # Tag your local image
 docker tag teable:latest your-username/teable:latest
-docker tag teable-db-migrate:latest your-username/teable-db-migrate:latest
 
 # Login to Docker Hub
 docker login
 
 # Push the image
 docker push your-username/teable:latest
-docker push your-username/teable-db-migrate:latest
 ```

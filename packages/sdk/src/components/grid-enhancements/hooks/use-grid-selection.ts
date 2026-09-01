@@ -1,15 +1,17 @@
 import { useMutation } from '@tanstack/react-query';
 import type { IGetRecordsRo } from '@teable/openapi';
-import { getRecordStatus } from '@teable/openapi';
+import { getRecordStatus, saveQueryParams } from '@teable/openapi';
 import { isEqual } from 'lodash';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFieldCellEditable, useFields, useRecord, useTableId, useViewId } from '../../../hooks';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ShareViewContext } from '../../../context/table/ShareViewContext';
+import { useFields, useRecord, useTableId, useViewId } from '../../../hooks';
 import type { Record as IRecord } from '../../../model';
 import type { IGridRef } from '../../grid/Grid';
-import type { ICell, ICellItem, IGridColumn, IInnerCell } from '../../grid/interface';
+import type { ICell, ICellItem, IGridColumn, IInnerCell, IRange } from '../../grid/interface';
 import { CellType, SelectionRegionType } from '../../grid/interface';
-import { emptySelection, type CombinedSelection } from '../../grid/managers';
+import { CombinedSelection, emptySelection } from '../../grid/managers';
 import { useGridViewStore } from '../store/useGridViewStore';
+import { LARGE_QUERY_THRESHOLD } from './constant';
 import { useCreateCellValue2GridDisplay } from './use-grid-columns';
 
 interface IUseGridSelectionProps {
@@ -21,12 +23,15 @@ interface IUseGridSelectionProps {
   gridRef: React.RefObject<IGridRef>;
 }
 
-interface IActiveCell {
+export interface IActiveCell {
   recordId: string;
   fieldId: string;
   rowIndex: number;
   columnIndex: number;
 }
+
+const findLoadedRecordEntry = (recordMap: Record<string, IRecord>, recordId: string) =>
+  Object.entries(recordMap).find(([, record]) => record?.id === recordId);
 
 export const useGridSelection = (props: IUseGridSelectionProps) => {
   const { recordMap, columns, viewQuery, gridRef } = props;
@@ -38,15 +43,20 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
   const prevActiveCellRef = useRef<IActiveCell | undefined>(activeCell);
 
   const fields = useFields();
-  const fieldEditable = useFieldCellEditable();
   const presortRecord = useRecord(presortRecordData?.recordId);
 
   const viewId = useViewId() as string;
   const tableId = useTableId() as string;
   const { setSelection } = useGridViewStore();
+  // In share-view context the common /api/table/.../record/.../status endpoint
+  // is rejected (reads must go through /api/share/*). The presort positioning
+  // optimization can degrade silently — share users still interact with cells
+  // normally without this status verification.
+  const { shareId } = useContext(ShareViewContext);
+  const isShareContext = Boolean(shareId);
 
   const { mutateAsync: mutateGetRecordStatus } = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       tableId,
       recordId,
       skip,
@@ -54,22 +64,35 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
       tableId: string;
       recordId: string;
       skip: number;
-    }) => getRecordStatus(tableId, recordId, { ...viewQuery, viewId, skip, take: 1 }),
-    onSuccess: (data) => {
-      if (activeCell == null) return setActiveCell(undefined);
+    }) => {
+      const { collapsedGroupIds, ...rest } = viewQuery || {};
 
-      const { isDeleted, isVisible } = data.data;
-
-      if (!isDeleted && !isVisible) {
-        setPresortRecordData({
-          rowIndex: activeCell.rowIndex,
-          recordId: activeCell.recordId,
+      if (collapsedGroupIds && collapsedGroupIds.length > LARGE_QUERY_THRESHOLD) {
+        const { data } = await saveQueryParams({ params: { collapsedGroupIds } });
+        return getRecordStatus(tableId, recordId, {
+          ...rest,
+          viewId,
+          skip,
+          take: 1,
+          queryId: data.queryId,
         });
       }
+      return getRecordStatus(tableId, recordId, { ...viewQuery, viewId, skip, take: 1 });
+    },
+    onSuccess: (data, { recordId, skip }) => {
+      const { isDeleted, isVisible } = data.data;
 
       if (isDeleted) {
         setActiveCell(undefined);
         setSelection(emptySelection);
+        gridRef.current?.setSelection(emptySelection);
+        return;
+      }
+
+      // Moved away and no longer loaded → keep the presort floating row.
+      if (!isVisible) {
+        if (findLoadedRecordEntry(recordMap, recordId)) return;
+        setPresortRecordData({ rowIndex: skip, recordId });
         gridRef.current?.setSelection(emptySelection);
       }
     },
@@ -80,7 +103,7 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
   const getPresortCellContent = useCallback<(cell: ICellItem) => ICell>(
     (cell) => {
       const [columnIndex] = cell;
-      const cellValue2GridDisplay = createCellValue2GridDisplay(fields, fieldEditable);
+      const cellValue2GridDisplay = createCellValue2GridDisplay(fields);
       if (presortRecord != null) {
         const fieldId = columns[columnIndex]?.id;
         if (!fieldId) return { type: CellType.Loading };
@@ -88,7 +111,7 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
       }
       return { type: CellType.Loading };
     },
-    [columns, createCellValue2GridDisplay, fieldEditable, fields, presortRecord]
+    [columns, createCellValue2GridDisplay, fields, presortRecord]
   );
 
   const onPresortCellEdited = useCallback(
@@ -162,6 +185,27 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
     [activeCell, columns, recordMap, setSelection]
   );
 
+  // Follow a record that left its row: select its new position if still loaded,
+  // otherwise ask the server (deleted → clear, else → floating row).
+  const followRecord = useCallback(
+    (recordId: string, fieldId: string, skip: number) => {
+      const entry = findLoadedRecordEntry(recordMap, recordId);
+      if (entry) {
+        setPresortRecordData(undefined);
+        const columnIndex = columns.findIndex((column) => column.id === fieldId);
+        if (columnIndex < 0) return;
+        const range = [columnIndex, parseInt(entry[0])] as IRange;
+        gridRef.current?.setSelection(
+          new CombinedSelection(SelectionRegionType.Cells, [range, range])
+        );
+        return;
+      }
+      if (isShareContext) return;
+      mutateGetRecordStatus({ tableId, recordId, skip });
+    },
+    [columns, gridRef, recordMap, isShareContext, tableId, mutateGetRecordStatus]
+  );
+
   useEffect(() => {
     if (activeCell == null || prevActiveCellRef.current == null) return;
 
@@ -175,15 +219,29 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
 
     if (recordMap[rowIndex]?.id === activeRecordId) return;
 
-    mutateGetRecordStatus({
-      tableId,
-      recordId: activeCell.recordId,
-      skip: activeCell.rowIndex,
-    });
-  }, [activeCell, gridRef, recordMap, tableId, mutateGetRecordStatus]);
+    // The focused record left its row → follow it.
+    followRecord(activeRecordId, activeCell.fieldId, activeCell.rowIndex);
+  }, [activeCell, recordMap, followRecord]);
+
+  useEffect(() => {
+    if (!gridRef.current?.isEditing()) return;
+
+    const { columnIndex, rowIndex, fieldId } = activeCell ?? {};
+
+    if (columnIndex == null || rowIndex == null || fieldId == null) return;
+
+    const realColumnIndex = columns.findIndex((column) => column.id === fieldId);
+
+    if (columnIndex === realColumnIndex) return;
+
+    const range = [realColumnIndex, rowIndex] as IRange;
+    gridRef.current?.setSelection(new CombinedSelection(SelectionRegionType.Cells, [range, range]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns]);
 
   return useMemo(
     () => ({
+      activeCell,
       presortRecord,
       presortRecordData,
       onSelectionChanged,
@@ -192,6 +250,7 @@ export const useGridSelection = (props: IUseGridSelectionProps) => {
       setPresortRecordData,
     }),
     [
+      activeCell,
       presortRecord,
       presortRecordData,
       onSelectionChanged,

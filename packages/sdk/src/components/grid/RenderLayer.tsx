@@ -26,6 +26,7 @@ export interface IRenderLayerProps
     | 'columns'
     | 'commentCountMap'
     | 'rowControls'
+    | 'rowControlPaddingX'
     | 'imageManager'
     | 'spriteManager'
     | 'scrollState'
@@ -36,11 +37,13 @@ export interface IRenderLayerProps
     | 'searchCursor'
     | 'searchHitIndex'
     | 'collaborators'
-    | 'columnHeaderVisible'
+    | 'columnHeaderHeight'
     | 'isMultiSelectionEnable'
     | 'getCellContent'
   > {
   isEditing?: boolean;
+  isFilling?: boolean;
+  isFillEnabled?: boolean;
   visibleRegion: IVisibleRegion;
   activeCell: ICellItem | null;
   activeCellBound: IActiveCellBound | null;
@@ -72,6 +75,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     commentCountMap,
     isEditing,
     rowControls,
+    rowControlPaddingX,
     visibleRegion,
     imageManager,
     spriteManager,
@@ -94,7 +98,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     rowIndexVisible,
     columnStatistics,
     columnResizeState,
-    columnHeaderVisible,
+    columnHeaderHeight,
     hoveredColumnResizeIndex,
     isColumnFreezable,
     isRowAppendEnable,
@@ -105,6 +109,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     getCellContent,
     real2RowIndex,
     getLinearRow,
+    isFilling,
+    isFillEnabled,
   } = props;
   const { containerWidth } = coordInstance;
   const { x, y, columnIndex, rowIndex, type, isOutOfBounds } = originMouseState;
@@ -148,6 +154,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
       commentCountMap,
       isEditing,
       rowControls,
+      rowControlPaddingX,
       visibleRegion,
       imageManager,
       spriteManager,
@@ -162,6 +169,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
       hoverCellPosition,
       mouseState: mousePosition ? { ...mouseState, ...mousePosition } : mouseState,
       selection,
+      isFilling,
+      isFillEnabled,
       isSelecting,
       isInteracting,
       coordInstance,
@@ -170,7 +179,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
       rowIndexVisible,
       columnStatistics,
       columnResizeState,
-      columnHeaderVisible,
+      columnHeaderHeight,
       hoveredColumnResizeIndex,
       isColumnFreezable,
       isRowAppendEnable,
@@ -192,6 +201,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     commentCountMap,
     isEditing,
     rowControls,
+    rowControlPaddingX,
     visibleRegion,
     imageManager,
     spriteManager,
@@ -206,6 +216,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     columnFreezeState,
     mousePosition,
     selection,
+    isFilling,
+    isFillEnabled,
     isSelecting,
     isInteracting,
     coordInstance,
@@ -214,7 +226,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     rowIndexVisible,
     columnStatistics,
     columnResizeState,
-    columnHeaderVisible,
+    columnHeaderHeight,
     hoverCellPosition,
     hoveredColumnResizeIndex,
     isColumnFreezable,

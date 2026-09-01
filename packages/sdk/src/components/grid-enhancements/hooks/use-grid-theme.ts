@@ -10,42 +10,44 @@ const darkTheme = {
   iconFgCommon: colors.slate[50],
 
   // Cell
-  cellBg: '#09090b',
-  cellBgHovered: colors.neutral[900],
-  cellBgSelected: colors.zinc[900],
-  cellBgLoading: colors.zinc[800],
-  cellLineColor: '#333338',
+  cellBg: '#121314',
+  cellBgHovered: '#1C1E1F',
+  cellBgSelected: '#242426',
+  cellBgLoading: hexToRGBA(colors.white, 0.08),
+  cellLineColor: hexToRGBA(colors.white, 0.1),
   cellLineColorActived: colors.zinc[400],
-  cellTextColor: colors.zinc[50],
+  cellTextColor: colors.zinc[200],
   cellOptionBg: colors.zinc[700],
-  cellOptionTextColor: colors.white,
+  cellOptionTextColor: colors.zinc[200],
 
   // Group Header
-  groupHeaderBgPrimary: colors.neutral[900],
-  groupHeaderBgSecondary: colors.neutral[800],
-  groupHeaderBgTertiary: colors.neutral[700],
+  groupHeaderBgPrimary: '#17181A',
+  groupHeaderBgSecondary: '#1D1D1F',
+  groupHeaderBgTertiary: '#252526',
 
   // Column Header
-  columnHeaderBg: colors.neutral[900],
-  columnHeaderBgHovered: colors.neutral[800],
-  columnHeaderBgSelected: colors.neutral[700],
-  columnHeaderNameColor: colors.slate[50],
+  columnHeaderBg: '#1C1D1F',
+  columnHeaderBgHovered: '#242426',
+  columnHeaderBgSelected: '#2C2D2E',
+  columnHeaderNameColor: colors.zinc[200],
   columnResizeHandlerBg: colors.zinc[500],
   columnDraggingPlaceholderBg: hexToRGBA(colors.white, 0.2),
 
   // Column Statistic
-  columnStatisticBgHovered: colors.zinc[800],
+  columnStatisticBgHoveredPrimary: '#262729',
+  columnStatisticBgHoveredSecondary: '#2C2C2E',
+  columnStatisticBgHoveredTertiary: '#323233',
 
   // Row Header
-  rowHeaderTextColor: colors.zinc[50],
+  rowHeaderTextColor: colors.zinc[200],
 
   // Append Row
-  appendRowBg: colors.neutral[900],
-  appendRowBgHovered: colors.neutral[800],
+  appendRowBg: colors.zinc[900],
+  appendRowBgHovered: colors.zinc[800],
 
   // Avatar
   avatarBg: colors.zinc[900],
-  avatarTextColor: colors.zinc[100],
+  avatarTextColor: colors.zinc[200],
   avatarSizeXS: 16,
   avatarSizeSM: 20,
   avatarSizeMD: 24,
@@ -56,16 +58,17 @@ const darkTheme = {
   scrollBarBg: colors.zinc[700],
 
   // interaction
-  interactionLineColorCommon: colors.zinc[600],
-  interactionLineColorHighlight: colors.violet[700],
+  interactionLineColorCommon: colors.zinc[700],
+  interactionLineColorHighlight: colors.blue[500],
 
   // search cursor
-  searchCursorBg: colors.orange[400],
-  searchTargetIndexBg: colors.yellow[700],
+  searchCursorBg: '#243854',
+  searchTargetIndexBg: '#172231',
+  searchTargetIndexSelectedBg: '#1E2D43',
 
   // comment
   commentCountBg: colors.orange[400],
-  commentCountTextColor: colors.white,
+  commentCountTextColor: colors.zinc[900],
 } as IGridTheme;
 
 export function useGridTheme(): IGridTheme {

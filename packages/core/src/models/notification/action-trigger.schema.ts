@@ -7,6 +7,10 @@ export const tableActionKeys = z.enum([
   'addField',
   'setField',
   'deleteField',
+  'taskProcessing',
+  'taskCompleted',
+  'taskCancelled',
+  'taskFailed',
 ]);
 
 export const viewActionKeys = z.enum([

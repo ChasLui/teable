@@ -7,12 +7,15 @@ export const userCellValueSchema = z.object({
   title: z.string(),
   email: z.string().optional(),
   avatarUrl: z.string().optional().nullable(),
+  isSystem: z.boolean().optional(),
 });
 
 export type IUserCellValue = z.infer<typeof userCellValueSchema>;
 
 export abstract class UserAbstractCore extends FieldCore {
   cellValueType!: CellValueType.String;
+
+  declare meta?: FieldCore['meta'];
 
   item2String(value: unknown) {
     if (value == null) {

@@ -2,7 +2,8 @@
   "add": "Yeni OAuth Uygulamaları",
   "title": {
     "add": "Yeni OAuth Uygulamaları",
-    "edit": "OAuth Uygulamalarını Düzenle"
+    "edit": "OAuth Uygulamalarını Düzenle",
+    "description": "Teable uygulamaları kendi adlarına hareket edebilir ve bir kullanıcının kimliğine bürünmeden işlemleri doğrudan API üzerinden gerçekleştirebilir. Daha fazla bilgi için <a>yardım belgelerimize</a> bakın."
   },
   "form": {
     "name": {
@@ -10,8 +11,7 @@
       "description": "OAuth Uygulamanızın adı."
     },
     "description": {
-      "label": "Açıklama",
-      "description": "OAuth Uygulamanızın kısa bir açıklaması."
+      "label": "Açıklama"
     },
     "homePageUrl": {
       "label": "Ana Sayfa URL'si",
@@ -30,10 +30,6 @@
       "label": "Geri Dönüş URL'si",
       "description": "Bir kullanıcı entegrasyonunuzu yetkilendirdikten sonra yönlendirilecek tam URL.",
       "add": "Geri Dönüş URL'si Ekle"
-    },
-    "scopes": {
-      "label": "İzinler",
-      "description": "OAuth Uygulamanızın ihtiyaç duyduğu izinler."
     },
     "secret": {
       "label": "İstemci gizli anahtarları",
@@ -59,5 +55,13 @@
     "scopes": "Bu uygulama aşağıdaki izinlere erişebilecek:",
     "redirectDescription": "Yetkilendirme şuraya yönlendirecek",
     "authorize": "Yetkilendir"
+  },
+  "help": {
+    "link": "https://help.teable.ai/en/api-doc/oauth",
+    "title": "Daha fazla bilgi"
+  },
+  "deleteConfirm": {
+    "title": "OAuth uygulamasını sil",
+    "description": "{{name}} OAuth uygulamasını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz."
   }
 }

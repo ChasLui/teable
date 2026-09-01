@@ -3,7 +3,6 @@ import type { IGetPluginCenterListVo, IPluginI18n, PluginPosition } from '@teabl
 import { getPluginCenterList } from '@teable/openapi';
 import { Button, cn, Dialog, DialogContent, DialogTrigger } from '@teable/ui-lib/shadcn';
 import { get } from 'lodash';
-import Image from 'next/image';
 import { useTranslation } from 'next-i18next';
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { PluginDetail } from './PluginDetail';
@@ -71,9 +70,11 @@ export const PluginCenterDialog = forwardRef<IPluginCenterDialogRef, IPluginCent
             )}
           >
             {plugins?.map((plugin) => {
-              const name = get(plugin.i18n, [language, 'name']) ?? plugin.name;
-              const description = get(plugin.i18n, [language, 'description']) ?? plugin.description;
-              const detailDesc = get(plugin.i18n, [language, 'detailDesc']) ?? plugin.detailDesc;
+              const name = (get(plugin.i18n, [language, 'name']) ?? plugin.name) as string;
+              const description = (get(plugin.i18n, [language, 'description']) ??
+                plugin.description) as string | undefined;
+              const detailDesc = (get(plugin.i18n, [language, 'detailDesc']) ??
+                plugin.detailDesc) as string | undefined;
               return (
                 <button
                   key={plugin.id}
@@ -87,17 +88,8 @@ export const PluginCenterDialog = forwardRef<IPluginCenterDialogRef, IPluginCent
                     })
                   }
                 >
-                  <Image
-                    src={plugin.logo}
-                    alt={name}
-                    width={56}
-                    height={56}
-                    sizes="100%"
-                    style={{
-                      objectFit: 'contain',
-                    }}
-                  />
-                  <div className="flex-auto text-left">
+                  <img src={plugin.logo} alt={name} className="size-14 object-contain" />
+                  <div className="flex-auto text-start">
                     <div>{name}</div>
                     <div
                       className="line-clamp-2 break-words text-[13px] text-muted-foreground"

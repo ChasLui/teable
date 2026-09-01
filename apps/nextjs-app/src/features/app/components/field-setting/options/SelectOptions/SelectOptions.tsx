@@ -2,7 +2,7 @@ import type { DropResult } from '@hello-pangea/dnd';
 import { DragDropContext, Draggable, Droppable } from '@hello-pangea/dnd';
 import type { ISelectFieldChoice, ISelectFieldOptions } from '@teable/core';
 import { ColorUtils } from '@teable/core';
-import { DraggableHandle, Plus, Trash2 } from '@teable/icons';
+import { DraggableHandle, Plus, Trash } from '@teable/icons';
 import { cn, Label, Switch } from '@teable/ui-lib/shadcn';
 import { Button } from '@teable/ui-lib/shadcn/ui/button';
 import { useTranslation } from 'next-i18next';
@@ -46,7 +46,7 @@ export const SelectOptions = (props: {
   };
 
   const onDefaultValueChange = (defaultValue: string | string[] | undefined) => {
-    onChange?.({ defaultValue });
+    onChange?.({ defaultValue: defaultValue ?? null } as Partial<ISelectFieldOptions>);
   };
 
   const onPreventAutoNewOptionsChange = (checked: boolean) => {
@@ -96,8 +96,11 @@ export const SelectOptions = (props: {
   };
 
   return (
-    <div className="flex grow flex-col space-y-2">
-      <div className="grow" style={{ maxHeight: choices.length * 36 }}>
+    <div className="border-bordr flex grow flex-col space-y-2 border-t pt-4">
+      <div
+        className="grow"
+        style={{ maxHeight: choices.length * 40, minHeight: Math.min(choices.length * 40, 140) }}
+      >
         <DragDropContext onDragEnd={onDragEnd}>
           <Droppable
             droppableId={'select-choice-container'}
@@ -112,21 +115,20 @@ export const SelectOptions = (props: {
                   className={cn('py-1', isLookup && 'cursor-default')}
                 >
                   <div className="flex items-center">
-                    {!isLookup && <DraggableHandle className="mr-1 size-4 cursor-grabbing" />}
+                    {!isLookup && <DraggableHandle className="me-1 size-4 cursor-grabbing" />}
                     <ChoiceItem
                       choice={choice}
                       readonly={isLookup}
-                      onChange={(key, value) => updateOptionChange(0, key, value)}
                       onKeyDown={onKeyDown}
                       onInputRef={(el) => (inputRefs.current[0] = el)}
                     />
                     {!isLookup && (
                       <Button
                         variant={'ghost'}
-                        className="size-6 rounded-full p-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
+                        className="size-6 rounded-sm p-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
                         onClick={() => deleteChoice(0)}
                       >
-                        <Trash2 className="size-4" />
+                        <Trash className="size-4 text-muted-foreground" />
                       </Button>
                     )}
                   </div>
@@ -157,7 +159,6 @@ export const SelectOptions = (props: {
                     >
                       {(draggableProvided) => {
                         const { draggableProps, dragHandleProps } = draggableProvided;
-
                         return (
                           <div
                             ref={draggableProvided.innerRef}
@@ -166,7 +167,7 @@ export const SelectOptions = (props: {
                           >
                             <div className="flex items-center">
                               {!isLookup && (
-                                <div {...dragHandleProps} className="mr-1 size-4">
+                                <div {...dragHandleProps} className="me-1 size-4">
                                   <DraggableHandle className="size-4 cursor-grabbing" />
                                 </div>
                               )}
@@ -180,10 +181,10 @@ export const SelectOptions = (props: {
                               {!isLookup && (
                                 <Button
                                   variant={'ghost'}
-                                  className="size-6 rounded-full p-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
+                                  className="size-6 rounded-sm p-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
                                   onClick={() => deleteChoice(index)}
                                 >
-                                  <Trash2 className="size-4" />
+                                  <Trash className="size-4 text-muted-foreground" />
                                 </Button>
                               )}
                             </div>
@@ -211,7 +212,7 @@ export const SelectOptions = (props: {
               {t('table:field.editor.addOption')}
             </Button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex h-8 items-center gap-2">
             <Switch
               id="allow-auto-new-options"
               checked={!options?.preventAutoNewOptions}
@@ -223,7 +224,8 @@ export const SelectOptions = (props: {
               {t('table:field.editor.allowNewOptionsWhenEditing')}
             </Label>
           </div>
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between border-t pt-4">
             <SelectDefaultValue
               isMultiple={isMultiple}
               onChange={onDefaultValueChange}

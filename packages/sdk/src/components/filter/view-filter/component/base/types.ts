@@ -26,6 +26,9 @@ interface IBaseSelect<V, O = IOption<V>> {
   cancelable?: boolean;
   modal?: boolean;
   defaultLabel?: React.ReactNode;
+  groupHeading?: string;
+  /** Heading used when this select renders as a stacked drawer. */
+  drawerTitle?: string;
 }
 
 interface IBaseMultipleSelect<V, O = IOption<V>>

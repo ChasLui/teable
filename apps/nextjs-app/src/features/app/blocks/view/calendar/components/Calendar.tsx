@@ -1,9 +1,16 @@
 /* eslint-disable import/no-duplicates */
 import type { EventDropArg, EventInput, EventMountArg } from '@fullcalendar/core/index.js';
+import arLocale from '@fullcalendar/core/locales/ar';
+import deLocale from '@fullcalendar/core/locales/de';
 import enGbLocale from '@fullcalendar/core/locales/en-gb';
+import esLocale from '@fullcalendar/core/locales/es';
 import frLocale from '@fullcalendar/core/locales/fr';
+import heLocale from '@fullcalendar/core/locales/he';
+import itLocale from '@fullcalendar/core/locales/it';
 import jaLocale from '@fullcalendar/core/locales/ja';
 import ruLocale from '@fullcalendar/core/locales/ru';
+import trLocale from '@fullcalendar/core/locales/tr';
+import ukLocale from '@fullcalendar/core/locales/uk';
 import zhCnLocale from '@fullcalendar/core/locales/zh-cn';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
@@ -11,10 +18,11 @@ import interactionPlugin from '@fullcalendar/interaction';
 import FullCalendar from '@fullcalendar/react';
 import { FieldKeyType } from '@teable/core';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Loader2 } from '@teable/icons';
+import { useTheme } from '@teable/next-themes';
 import { updateRecord } from '@teable/openapi';
 import { AppContext, CalendarDailyCollectionContext } from '@teable/sdk/context';
-import { useTableId } from '@teable/sdk/hooks';
-import { Record } from '@teable/sdk/model';
+import { useTableId, useRecordOperations } from '@teable/sdk/hooks';
+import type { Record } from '@teable/sdk/model';
 import {
   Button,
   Dialog,
@@ -28,7 +36,7 @@ import {
   cn,
 } from '@teable/ui-lib/shadcn';
 import { addDays, subDays, format, set } from 'date-fns';
-import { enUS, zhCN, ja, ru, fr } from 'date-fns/locale';
+import { ar, de, enUS, es, fr, he, it, ja, ru, tr, uk, zhCN } from 'date-fns/locale';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { useTranslation } from 'next-i18next';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -36,7 +44,7 @@ import { tableConfig } from '@/features/i18n/table.config';
 import { EventListContainer } from '../components/EventListContainer';
 import { EventMenu } from '../components/EventMenu';
 import { useCalendar, useEventMenuStore } from '../hooks';
-import { getColorByConfig, getDateByTimezone, getEventTitle } from '../util';
+import { getColorByConfig, getDateByTimezone, getEventTitle, getPlainCellText } from '../util';
 
 const ADD_EVENT_BUTTON_CLASS_NAME = 'calendar-add-event-button';
 const MORE_LINK_TEXT_CLASS_NAME = 'calendar-custom-more-link-text';
@@ -47,6 +55,13 @@ const FULL_CALENDAR_LOCALE_MAP = {
   ja: jaLocale,
   ru: ruLocale,
   fr: frLocale,
+  de: deLocale,
+  es: esLocale,
+  it: itLocale,
+  tr: trLocale,
+  uk: ukLocale,
+  ar: arLocale,
+  he: heLocale,
 };
 
 // Remember to update in @sdk/src/components/editor/date/EditorMain.tsx
@@ -56,6 +71,13 @@ const DATE_PICKER_LOCAL_MAP = {
   ja: ja,
   ru: ru,
   fr: fr,
+  de: de,
+  es: es,
+  it: it,
+  tr: tr,
+  uk: uk,
+  ar: ar,
+  he: he,
 };
 
 export interface ICalendarProps {
@@ -76,9 +98,11 @@ export const Calendar = (props: ICalendarProps) => {
   } = useCalendar();
   const tableId = useTableId();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
+  const { resolvedTheme } = useTheme();
   const { lang = 'en' } = useContext(AppContext);
   const calendarDailyCollection = useContext(CalendarDailyCollectionContext);
   const { openEventMenu } = useEventMenuStore();
+  const { createRecords } = useRecordOperations();
   const [positionDate, setPositionDate] = useState<Date>();
   const [moreLinkDate, setMoreLinkDate] = useState<Date>();
   const [title, setTitle] = useState<string>('');
@@ -136,16 +160,19 @@ export const Calendar = (props: ICalendarProps) => {
         const newDate = set(date, { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 });
         const newDateStr = fromZonedTime(newDate, timeZone).toISOString();
 
-        const { data } = await Record.createRecords(tableId, {
-          fieldKeyType: FieldKeyType.Id,
-          records: [
-            {
-              fields: {
-                [startDateField.id]: newDateStr,
-                [endDateField.id]: newDateStr,
+        const { data } = await createRecords({
+          tableId,
+          recordsRo: {
+            fieldKeyType: FieldKeyType.Id,
+            records: [
+              {
+                fields: {
+                  [startDateField.id]: newDateStr,
+                  [endDateField.id]: newDateStr,
+                },
               },
-            },
-          ],
+            ],
+          },
         });
 
         setExpandRecordId?.(data.records[0].id);
@@ -190,6 +217,7 @@ export const Calendar = (props: ICalendarProps) => {
         .querySelectorAll(`.${ADD_EVENT_BUTTON_CLASS_NAME}`)
         .forEach((button) => button.remove());
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId, endDateField, startDateField, eventCreatable, dateRange, setExpandRecordId]);
 
   const onDatesChanged = (data: { start: Date; end: Date }) => {
@@ -224,14 +252,15 @@ export const Calendar = (props: ICalendarProps) => {
         const { color: textColor, backgroundColor } = getColorByConfig(
           r as unknown as Record,
           colorConfig,
-          colorField
+          colorField,
+          resolvedTheme
         );
         const endDate = end ? addDays(new Date(end as string), 1).toISOString() : undefined;
 
         return {
           id: r.id,
           title: getEventTitle(
-            titleField.cellValue2String(title) || t('sdk:common.unnamedRecord'),
+            getPlainCellText(titleField, title) || t('sdk:common.unnamedRecord'),
             start as string,
             startDateField
           ),
@@ -247,7 +276,16 @@ export const Calendar = (props: ICalendarProps) => {
         };
       })
       .filter(Boolean) as EventInput[];
-  }, [records, colorConfig, titleField, colorField, startDateField, endDateField, t]);
+  }, [
+    records,
+    colorConfig,
+    titleField,
+    colorField,
+    startDateField,
+    endDateField,
+    t,
+    resolvedTheme,
+  ]);
 
   useEffect(() => {
     if (!countMap) return;
@@ -258,21 +296,40 @@ export const Calendar = (props: ICalendarProps) => {
         const dayEl = element.closest('.fc-day') as HTMLElement;
         const date = dayEl?.dataset.date;
         if (date && countMap[date]) {
-          element.textContent = t('table:calendar.moreLinkText', { count: countMap[date] });
+          const newText = t('table:calendar.moreLinkText', { count: countMap[date] });
+          if (element.textContent !== newText) {
+            element.textContent = newText;
+          }
         }
       });
     };
 
-    updateMoreLinkText();
+    const calendarContainer = containerRef.current;
 
-    const observer = new MutationObserver(updateMoreLinkText);
-    observer.observe(document.body, {
+    if (!calendarContainer) return;
+
+    const observer = new MutationObserver((mutations) => {
+      const relevantMutations = mutations.filter((mutation) =>
+        Array.from(mutation.addedNodes).some(
+          (node) =>
+            node instanceof HTMLElement &&
+            (node.classList.contains(MORE_LINK_TEXT_CLASS_NAME) ||
+              node.querySelector(`.${MORE_LINK_TEXT_CLASS_NAME}`))
+        )
+      );
+
+      if (relevantMutations.length > 0) {
+        updateMoreLinkText();
+      }
+    });
+
+    observer.observe(calendarContainer, {
       subtree: true,
       childList: true,
     });
 
     return () => observer.disconnect();
-  }, [countMap, t]);
+  }, [countMap, t, containerRef]);
 
   const onEventDidMount = (info: EventMountArg) => {
     const element = info.el as HTMLElement;
@@ -400,7 +457,7 @@ export const Calendar = (props: ICalendarProps) => {
             {title || calendarRef.current?.getApi().view.title}
             <Loader2
               className={cn(
-                'ml-1 size-5 animate-spin transition-opacity duration-1000',
+                'ms-1 size-5 animate-spin transition-opacity duration-1000',
                 isLoading ? 'opacity-100' : 'opacity-0'
               )}
             />
@@ -409,8 +466,8 @@ export const Calendar = (props: ICalendarProps) => {
         <div className="flex items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" size="sm">
-                <CalendarIcon className="size-4" />
+              <Button variant="outline" size="icon-sm">
+                <CalendarIcon className="size-4 shrink-0" />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -428,11 +485,11 @@ export const Calendar = (props: ICalendarProps) => {
             {t('sdk:editor.date.today')}
           </Button>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={onPrevHandler}>
-              <ChevronLeft className="size-4" />
+            <Button variant="outline" size="icon-sm" onClick={onPrevHandler}>
+              <ChevronLeft className="size-4 shrink-0" />
             </Button>
-            <Button variant="outline" size="sm" onClick={onNextHandler}>
-              <ChevronRight className="size-4" />
+            <Button variant="outline" size="icon-sm" onClick={onNextHandler}>
+              <ChevronRight className="size-4 shrink-0" />
             </Button>
           </div>
         </div>

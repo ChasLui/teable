@@ -1,19 +1,21 @@
+/* eslint-disable sonarjs/no-duplicate-string */
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import type { IUserInfoVo, IUserMeVo } from '@teable/openapi';
+import { type IUserInfoVo, type IUserMeVo } from '@teable/openapi';
 import { omit, pick } from 'lodash';
 import ms from 'ms';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
+import { TeableJwtService } from './jwt/teable-jwt.service';
 import { PermissionService } from './permission.service';
-import type { IJwtAuthInfo } from './strategies/types';
+import { JwtAuthInternalType } from './strategies/types';
+import type { IJwtAuthInternalInfo, IJwtAuthInfo } from './strategies/types';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly cls: ClsService<IClsStore>,
     private readonly permissionService: PermissionService,
-    private readonly jwtService: JwtService
+    private readonly jwtService: TeableJwtService
   ) {}
 
   async getUserInfo(user: IUserMeVo): Promise<IUserInfoVo> {
@@ -37,11 +39,36 @@ export class AuthService {
     }
   }
 
-  async getTempToken() {
+  async getTempToken(expiresIn: string = '10m', userId?: string, allowSystemUser?: boolean) {
     const payload: IJwtAuthInfo = {
-      userId: this.cls.get('user.id'),
+      userId: userId ?? this.cls.get('user.id'),
+      ...(allowSystemUser ? { allowSystemUser: true } : {}),
     };
-    const expiresIn = '10m';
+    return {
+      accessToken: await this.jwtService.signAsync(payload, { expiresIn }),
+      expiresTime: new Date(Date.now() + ms(expiresIn)).toISOString(),
+    };
+  }
+
+  async getTempInternalToken(
+    baseId: string,
+    type: JwtAuthInternalType,
+    expiresIn: string = '10m',
+    context?: IJwtAuthInternalInfo['context']
+  ) {
+    // For User type tokens, userId is required
+    const userId = this.cls.get('user.id');
+    if (type === JwtAuthInternalType.User && !userId) {
+      throw new UnauthorizedException('User identity is required for User type tokens');
+    }
+
+    const payload = {
+      type,
+      baseId,
+      // Include userId for User type tokens to maintain user identity
+      ...(type === JwtAuthInternalType.User ? { userId } : {}),
+      ...(context ? { context } : {}),
+    } as IJwtAuthInternalInfo;
     return {
       accessToken: await this.jwtService.signAsync(payload, { expiresIn }),
       expiresTime: new Date(Date.now() + ms(expiresIn)).toISOString(),

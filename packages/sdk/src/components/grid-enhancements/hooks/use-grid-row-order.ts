@@ -1,13 +1,14 @@
 import { FieldKeyType } from '@teable/core';
 import { useCallback, useMemo, useState } from 'react';
-import { useTableId, useView, useViewId } from '../../../hooks';
-import { Record, type GridView } from '../../../model';
+import { useRecordOperations, useTableId, useView, useViewId } from '../../../hooks';
+import type { GridView } from '../../../model';
 import type { IRecordIndexMap } from './use-grid-async-records';
 
 export const useGridRowOrder = (recordMap: IRecordIndexMap) => {
-  const tableId = useTableId();
+  const tableId = useTableId() as string;
   const viewId = useViewId();
   const view = useView(viewId) as GridView | undefined;
+  const { updateRecords } = useRecordOperations();
   const group = view?.group;
 
   const [draggingRecordIds, setDraggingRecordIds] = useState<string[]>();
@@ -42,13 +43,16 @@ export const useGridRowOrder = (recordMap: IRecordIndexMap) => {
       }
 
       if (newRowIndex === 0) {
-        return Record.updateRecords(tableId as string, {
-          fieldKeyType: FieldKeyType.Id,
-          records: draggingRecordIds.map((recordId) => ({ id: recordId, fields: fieldValueMap })),
-          order: {
-            viewId,
-            anchorId: recordMap[0].id,
-            position: 'before',
+        return updateRecords({
+          tableId,
+          recordsRo: {
+            fieldKeyType: FieldKeyType.Id,
+            records: draggingRecordIds.map((recordId) => ({ id: recordId, fields: fieldValueMap })),
+            order: {
+              viewId,
+              anchorId: recordMap[0].id,
+              position: 'before',
+            },
           },
         });
       }
@@ -58,16 +62,20 @@ export const useGridRowOrder = (recordMap: IRecordIndexMap) => {
         throw new Error("Can't find target record by index: " + newRowIndex);
       }
 
-      return Record.updateRecords(tableId as string, {
-        fieldKeyType: FieldKeyType.Id,
-        records: draggingRecordIds.map((recordId) => ({ id: recordId, fields: fieldValueMap })),
-        order: {
-          viewId,
-          anchorId: record.id,
-          position: 'after',
+      return updateRecords({
+        tableId,
+        recordsRo: {
+          fieldKeyType: FieldKeyType.Id,
+          records: draggingRecordIds.map((recordId) => ({ id: recordId, fields: fieldValueMap })),
+          order: {
+            viewId,
+            anchorId: record.id,
+            position: 'after',
+          },
         },
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewId, group, recordMap, tableId, draggingRecordIds]
   );
 

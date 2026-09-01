@@ -1,20 +1,35 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ITableActionKey, IViewActionKey } from '@teable/core';
+import { useQueryClient } from '@tanstack/react-query';
+import type { IFilter, ITableActionKey, IViewActionKey } from '@teable/core';
 import type { ICalendarDailyCollectionRo } from '@teable/openapi';
 import { getCalendarDailyCollection, getShareViewCalendarDailyCollection } from '@teable/openapi';
+import { throttle } from 'lodash';
 import type { FC, ReactNode } from 'react';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { ReactQueryKeys } from '../../config';
-import { useSearch, useIsHydrated, useTableListener, useViewListener, useView } from '../../hooks';
+import {
+  useSearch,
+  useIsHydrated,
+  useServerViewFilter,
+  useViewListener,
+  useView,
+} from '../../hooks';
+import { useDocumentVisible } from '../../hooks/use-document-visible';
+import {
+  collectRelevantFieldIds,
+  useFieldAwareTableListener,
+} from '../../hooks/use-field-aware-table-listener';
 import type { CalendarView } from '../../model';
 import { AnchorContext } from '../anchor';
 import { ShareViewContext } from '../table/ShareViewContext';
 import { CalendarDailyCollectionContext } from './CalendarDailyCollectionContext';
+import { useShareAwareQuery } from './use-share-aware-query';
 
 interface ICalendarDailyCollectionProviderProps {
   children: ReactNode;
   query?: ICalendarDailyCollectionRo;
 }
+
+const THROTTLE_TIME = 2000;
 
 export const CalendarDailyCollectionProvider: FC<ICalendarDailyCollectionProviderProps> = ({
   children,
@@ -26,21 +41,15 @@ export const CalendarDailyCollectionProvider: FC<ICalendarDailyCollectionProvide
   const { searchQuery } = useSearch();
   const { shareId } = useContext(ShareViewContext);
   const view = useView() as CalendarView | undefined;
+  const visible = useDocumentVisible();
   const viewFilter = view?.filter;
   const { startDate, endDate, startDateFieldId, endDateFieldId } = query ?? {};
 
   const isEnabled = Boolean(startDate && endDate && startDateFieldId && endDateFieldId);
 
   const calenderDailyCollectionQuery = useMemo(() => {
-    const {
-      startDate,
-      endDate,
-      startDateFieldId,
-      endDateFieldId,
-      viewId,
-      filter,
-      ignoreViewQuery,
-    } = query ?? {};
+    const { startDate, endDate, startDateFieldId, endDateFieldId, filter, ignoreViewQuery } =
+      query ?? {};
     return {
       viewId,
       search: searchQuery,
@@ -51,61 +60,89 @@ export const CalendarDailyCollectionProvider: FC<ICalendarDailyCollectionProvide
       filter: shareId ? viewFilter : filter,
       ignoreViewQuery,
     };
-  }, [query, searchQuery, shareId, viewFilter]);
+  }, [query, viewId, searchQuery, shareId, viewFilter]);
 
-  const queryKey = useMemo(
-    () =>
-      ReactQueryKeys.calendarDailyCollection(
-        shareId || (tableId as string),
-        calenderDailyCollectionQuery
-      ),
-    [shareId, tableId, calenderDailyCollectionQuery]
+  const commonQueryKey = useMemo(
+    () => ReactQueryKeys.calendarDailyCollection(tableId as string, calenderDailyCollectionQuery),
+    [tableId, calenderDailyCollectionQuery]
   );
 
-  const { data: commonCalendarDailyCollection } = useQuery({
-    queryKey,
-    queryFn: ({ queryKey }) =>
-      getCalendarDailyCollection(queryKey[1], queryKey[2]).then(({ data }) => data),
-    enabled: Boolean(!shareId && tableId && isHydrated && isEnabled),
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
-  });
+  const shareQueryKey = useMemo(
+    () =>
+      ReactQueryKeys.shareCalendarDailyCollection(shareId as string, calenderDailyCollectionQuery),
+    [shareId, calenderDailyCollectionQuery]
+  );
 
-  const { data: shareCalendarDailyCollection } = useQuery({
-    queryKey,
-    queryFn: ({ queryKey }) =>
-      getShareViewCalendarDailyCollection(queryKey[1], queryKey[2]).then(({ data }) => data),
-    enabled: Boolean(shareId && tableId && isHydrated && isEnabled),
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+  const { data: resCalendarDailyCollection, activeQueryKey } = useShareAwareQuery({
+    shareId,
+    enabled: Boolean(tableId && isHydrated && isEnabled && visible),
+    common: {
+      queryKey: commonQueryKey,
+      queryFn: () =>
+        getCalendarDailyCollection(tableId as string, calenderDailyCollectionQuery).then(
+          ({ data }) => data
+        ),
+    },
+    share: {
+      queryKey: shareQueryKey,
+      queryFn: () =>
+        getShareViewCalendarDailyCollection(shareId as string, calenderDailyCollectionQuery).then(
+          ({ data }) => data
+        ),
+    },
   });
-
-  const resCalendarDailyCollection = shareId
-    ? shareCalendarDailyCollection
-    : commonCalendarDailyCollection;
 
   const updateCalendarDailyCollection = useCallback(
     () =>
       queryClient.invalidateQueries({
-        queryKey: queryKey.slice(0, 3),
+        queryKey: activeQueryKey.slice(0, 3),
       }),
-    [queryClient, queryKey]
+    [queryClient, activeQueryKey]
   );
+
+  const throttleUpdateCalendarDailyCollection = useMemo(() => {
+    return throttle(updateCalendarDailyCollection, THROTTLE_TIME);
+  }, [updateCalendarDailyCollection]);
 
   const updateCalendarDailyCollectionForTable = useCallback(() => {
     queryClient.invalidateQueries({
-      queryKey: queryKey.slice(0, 2),
+      queryKey: activeQueryKey.slice(0, 2),
     });
-  }, [queryClient, queryKey]);
+  }, [queryClient, activeQueryKey]);
+
+  const throttleUpdateCalendarDailyCollectionForTable = useMemo(() => {
+    return throttle(updateCalendarDailyCollectionForTable, THROTTLE_TIME);
+  }, [updateCalendarDailyCollectionForTable]);
+
+  const serverViewFilter = useServerViewFilter();
+
+  const relevantFieldIds = useMemo(
+    () =>
+      collectRelevantFieldIds({
+        queryFilter: calenderDailyCollectionQuery.filter as IFilter | undefined,
+        viewFilter: serverViewFilter,
+        search: calenderDailyCollectionQuery.search,
+        extraFieldIds: [
+          calenderDailyCollectionQuery.startDateFieldId,
+          calenderDailyCollectionQuery.endDateFieldId,
+        ].filter(Boolean),
+      }),
+    [calenderDailyCollectionQuery, serverViewFilter]
+  );
 
   const tableMatches = useMemo<ITableActionKey[]>(
     () => ['setRecord', 'addRecord', 'deleteRecord'],
     []
   );
-  useTableListener(tableId, tableMatches, updateCalendarDailyCollectionForTable);
+  useFieldAwareTableListener(
+    tableId,
+    tableMatches,
+    relevantFieldIds,
+    throttleUpdateCalendarDailyCollectionForTable
+  );
 
   const viewMatches = useMemo<IViewActionKey[]>(() => ['applyViewFilter'], []);
-  useViewListener(viewId, viewMatches, updateCalendarDailyCollection);
+  useViewListener(viewId, viewMatches, throttleUpdateCalendarDailyCollection);
 
   const calendarDailyCollection = useMemo(
     () => resCalendarDailyCollection || null,
@@ -114,9 +151,9 @@ export const CalendarDailyCollectionProvider: FC<ICalendarDailyCollectionProvide
 
   useEffect(() => {
     return () => {
-      queryClient.removeQueries({ queryKey });
+      queryClient.removeQueries({ queryKey: activeQueryKey });
     };
-  }, [queryClient, queryKey]);
+  }, [queryClient, activeQueryKey]);
 
   return (
     <CalendarDailyCollectionContext.Provider value={calendarDailyCollection}>

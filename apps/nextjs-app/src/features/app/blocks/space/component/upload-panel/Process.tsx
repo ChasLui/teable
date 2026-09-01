@@ -1,7 +1,7 @@
-import { X } from '@teable/icons';
-import { getFieldIconString } from '@teable/sdk';
-import { cn, Progress } from '@teable/ui-lib';
+import { Trash, TeableNew } from '@teable/icons';
+import { Button, cn, Progress } from '@teable/ui-lib';
 import { filesize } from 'filesize';
+import { renderToString } from 'react-dom/server';
 
 interface IFileItemProps {
   file: File;
@@ -11,22 +11,30 @@ interface IFileItemProps {
 
 export const Process = (props: IFileItemProps) => {
   const { file, onClose, process } = props;
-  const { name, size, type } = file;
+  const { name, size } = file;
+
+  const teaIcon = 'data:image/svg+xml,' + encodeURIComponent(renderToString(TeableNew({})));
 
   return (
     <>
-      <div className="group relative rounded-sm text-sm">
+      <div className="max-w-100 group relative flex flex-col items-center gap-4 rounded-lg border px-6 py-8 text-sm">
         <img
-          className="size-full rounded-sm bg-secondary object-contain p-2"
-          src={getFieldIconString(type)}
+          className="size-24 rounded-lg border bg-secondary object-contain p-4"
+          src={teaIcon}
           alt={name}
         />
-        <div>{name}</div>
-        <div>{filesize(size)}</div>
-        <X
-          className="absolute -right-2 -top-2 hidden size-4 cursor-pointer rounded-full bg-secondary p-0.5 group-hover:block hover:opacity-70"
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="text-sm font-medium">{name}</div>
+          <div className="text-xs text-muted-foreground">{filesize(size)}</div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="absolute end-2 top-2"
           onClick={() => onClose()}
-        />
+        >
+          <Trash className="size-4 text-muted-foreground" />
+        </Button>
       </div>
       {<Progress className={cn('absolute top-0', { hidden: process === 100 })} value={process} />}
     </>

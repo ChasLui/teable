@@ -2,14 +2,12 @@ import { IdPrefix } from '../../utils';
 import { z } from '../../zod';
 import { columnMetaSchema } from './column-meta.schema';
 import { ViewType } from './constant';
-import {
-  calendarViewOptionSchema,
-  formViewOptionSchema,
-  galleryViewOptionSchema,
-  gridViewOptionSchema,
-  kanbanViewOptionSchema,
-  pluginViewOptionSchema,
-} from './derivate';
+import { calendarViewOptionSchema } from './derivate/calendar-view-option.schema';
+import { formViewOptionSchema } from './derivate/form-view-option.schema';
+import { galleryViewOptionSchema } from './derivate/gallery-view-option.schema';
+import { gridViewOptionSchema } from './derivate/grid-view-option.schema';
+import { kanbanViewOptionSchema } from './derivate/kanban-view-option.schema';
+import { pluginViewOptionSchema } from './derivate/plugin-view-option.schema';
 import { filterSchema } from './filter';
 import { groupSchema } from './group';
 import { viewOptionsSchema } from './option.schema';
@@ -17,17 +15,17 @@ import { sortSchema } from './sort';
 
 export const sharePasswordSchema = z.string().min(3);
 
+export const shareViewMetaSubmitSchema = z.object({
+  requireLogin: z.boolean().optional(),
+});
+
 export const shareViewMetaSchema = z.object({
   allowCopy: z.boolean().optional(),
   includeHiddenField: z.boolean().optional(),
   password: sharePasswordSchema.optional(),
   includeRecords: z.boolean().optional(),
-  submit: z
-    .object({
-      allow: z.boolean().optional(),
-      requireLogin: z.boolean().optional(),
-    })
-    .optional(),
+  submit: shareViewMetaSubmitSchema.optional(),
+  allowEdit: z.boolean().optional(),
 });
 
 export type IShareViewMeta = z.infer<typeof shareViewMetaSchema>;
@@ -35,7 +33,7 @@ export type IShareViewMeta = z.infer<typeof shareViewMetaSchema>;
 export const viewVoSchema = z.object({
   id: z.string().startsWith(IdPrefix.View),
   name: z.string(),
-  type: z.nativeEnum(ViewType),
+  type: z.enum(ViewType),
   description: z.string().optional(),
   order: z.number().optional(),
   options: viewOptionsSchema.optional(),
@@ -50,7 +48,7 @@ export const viewVoSchema = z.object({
   lastModifiedBy: z.string().optional(),
   createdTime: z.string(),
   lastModifiedTime: z.string().optional(),
-  columnMeta: columnMetaSchema.openapi({
+  columnMeta: columnMetaSchema.meta({
     description: 'A mapping of view IDs to their corresponding column metadata.',
   }),
   pluginId: z.string().optional(),
@@ -71,6 +69,7 @@ export const viewRoSchema = viewVoSchema
     name: true,
     order: true,
     columnMeta: true,
+    isLocked: true,
   })
   .superRefine((data, ctx) => {
     const { type } = data;

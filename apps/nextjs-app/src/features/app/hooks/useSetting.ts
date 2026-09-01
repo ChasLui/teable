@@ -14,11 +14,26 @@ export const useSetting = () => {
     disallowSignUp = false,
     disallowSpaceCreation = false,
     disallowSpaceInvitation = false,
+    disallowDashboard = false,
+    appGenerationEnabled = false,
+    createdTime,
+    enableCreditReward = false,
   } = setting ?? {};
 
   return {
     disallowSignUp,
     disallowSpaceCreation: !user.isAdmin && (isLoading || disallowSpaceCreation),
     disallowSpaceInvitation: !user.isAdmin && (isLoading || disallowSpaceInvitation),
+    disallowDashboard,
+    appGenerationEnabled,
+    createdTime,
+    enableCreditReward,
   };
+};
+
+export const usePublicSettingQuery = () => {
+  return useQuery({
+    queryKey: ReactQueryKeys.getPublicSetting(),
+    queryFn: () => getPublicSetting().then(({ data }) => data),
+  });
 };

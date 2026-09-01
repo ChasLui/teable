@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { hasPermission } from '@teable/core';
 import { MoreHorizontal } from '@teable/icons';
-import { deleteSpace, type IGetSpaceVo } from '@teable/openapi';
+import { deleteSpace, permanentDeleteSpace, type IGetSpaceVo } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { useRouter } from 'next/router';
 import React, { useMemo } from 'react';
@@ -20,6 +20,7 @@ export const SpaceOperation = (props: ISpaceOperationProps) => {
   const { space, className, onRename, open, setOpen, onImportBase } = props;
   const queryClient = useQueryClient();
   const router = useRouter();
+  const currentSpaceId = router.query.spaceId as string;
   const menuPermission = useMemo(() => {
     return {
       spaceUpdate: hasPermission(space.role, 'space|update'),
@@ -31,15 +32,25 @@ export const SpaceOperation = (props: ISpaceOperationProps) => {
     mutationFn: deleteSpace,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ReactQueryKeys.spaceList() });
+      if (currentSpaceId === space.id) {
+        router.push({
+          pathname: '/space',
+        });
+      }
     },
   });
 
-  const onSpaceSetting = () => {
-    router.push({
-      pathname: '/space/[spaceId]/setting/general',
-      query: { spaceId: space.id },
-    });
-  };
+  const { mutate: permanentDeleteSpaceMutator } = useMutation({
+    mutationFn: permanentDeleteSpace,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.spaceList() });
+      if (currentSpaceId === space.id) {
+        router.push({
+          pathname: '/space',
+        });
+      }
+    },
+  });
 
   if (!Object.values(menuPermission).some(Boolean)) {
     return null;
@@ -57,11 +68,10 @@ export const SpaceOperation = (props: ISpaceOperationProps) => {
         space={space}
         showRename={menuPermission.spaceUpdate}
         showDelete={menuPermission.spaceDelete}
-        showSpaceSetting={menuPermission.spaceUpdate}
         showImportBase={menuPermission.spaceUpdate}
         onDelete={() => deleteSpaceMutator(space.id)}
+        onPermanentDelete={() => permanentDeleteSpaceMutator(space.id)}
         onRename={onRename}
-        onSpaceSetting={onSpaceSetting}
         open={open}
         setOpen={setOpen}
         onImportBase={onImportBase}

@@ -92,6 +92,12 @@ const actionsI18nMap: Record<
   'table|trash_reset': {
     description: 'permission.actionDescription.tableTrashReset',
   },
+  'table|archive_read': {
+    description: 'permission.actionDescription.tableArchiveRead',
+  },
+  'table|archive_manage': {
+    description: 'permission.actionDescription.tableArchiveManage',
+  },
   'table_record_history|read': {
     description: 'permission.actionDescription.recordHistoryRead',
   },
@@ -137,6 +143,12 @@ const actionsI18nMap: Record<
   'record|update': {
     description: 'permission.actionDescription.recordUpdate',
   },
+  'record|copy': {
+    description: 'permission.actionDescription.recordCopy',
+  },
+  'record|archive': {
+    description: 'permission.actionDescription.recordArchive',
+  },
   'automation|create': {
     description: 'permission.actionDescription.automationCreate',
   },
@@ -149,8 +161,23 @@ const actionsI18nMap: Record<
   'automation|update': {
     description: 'permission.actionDescription.automationUpdate',
   },
+  'app|create': {
+    description: 'permission.actionDescription.appCreate',
+  },
+  'app|delete': {
+    description: 'permission.actionDescription.appDelete',
+  },
+  'app|read': {
+    description: 'permission.actionDescription.appRead',
+  },
+  'app|update': {
+    description: 'permission.actionDescription.appUpdate',
+  },
   'user|email_read': {
     description: 'permission.actionDescription.userEmailRead',
+  },
+  'user|integrations': {
+    description: 'permission.actionDescription.userIntegrations',
   },
   'base|query_data': {
     description: 'permission.actionDescription.baseQuery',
@@ -191,6 +218,9 @@ const actionPrefixI18nMap: Record<ActionPrefix, { title: TKey }> = {
   [ActionPrefix.Automation]: {
     title: 'noun.automation',
   },
+  [ActionPrefix.App]: {
+    title: 'noun.app',
+  },
   [ActionPrefix.User]: {
     title: 'noun.user',
   },
@@ -204,6 +234,22 @@ const actionPrefixI18nMap: Record<ActionPrefix, { title: TKey }> = {
     title: 'noun.enterprise',
   },
 };
+
+// Preferred order for displaying action prefixes
+const ACTION_PREFIX_DISPLAY_ORDER: readonly ActionPrefix[] = [
+  ActionPrefix.Record,
+  ActionPrefix.Field,
+  ActionPrefix.Table,
+  ActionPrefix.View,
+  ActionPrefix.Base,
+  ActionPrefix.Space,
+  ActionPrefix.App,
+  ActionPrefix.User,
+  ActionPrefix.TableRecordHistory,
+  ActionPrefix.Automation,
+  ActionPrefix.Enterprise,
+  ActionPrefix.Instance,
+] as const;
 
 export const usePermissionActionsStatic = () => {
   const { t } = useTranslation();
@@ -227,6 +273,11 @@ export const usePermissionActionsStatic = () => {
       },
       {} as Record<ActionPrefix, { title: string }>
     );
-    return { actionStaticMap, actionPrefixStaticMap };
+
+    return {
+      actionStaticMap,
+      actionPrefixStaticMap,
+      actionPrefixDisplayOrder: ACTION_PREFIX_DISPLAY_ORDER,
+    };
   }, [t]);
 };

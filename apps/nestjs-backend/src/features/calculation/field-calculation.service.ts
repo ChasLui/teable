@@ -1,18 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import { type IRecord } from '@teable/core';
+import { FieldType, type IRecord } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { uniq } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { concatMap, lastValueFrom, map, range, toArray } from 'rxjs';
 import { ThresholdConfig, IThresholdConfig } from '../../configs/threshold.config';
+import { DatabaseRouter } from '../../global/database-router.service';
+import { DATA_KNEX } from '../../global/knex/knex.module';
 import { Timing } from '../../utils/timing';
-import { systemDbFieldNames } from '../field/constant';
 import type { IFieldInstance, IFieldMap } from '../field/model/factory';
-import { BatchService } from './batch.service';
+import { InjectRecordQueryBuilder, IRecordQueryBuilder } from '../record/query-builder';
 import type { IFkRecordMap } from './link.service';
-import type { IGraphItem, ITopoItem } from './reference.service';
 import { ReferenceService } from './reference.service';
+import type { IGraphItem, ITopoItem } from './utils/dfs';
 import { getTopoOrders, prependStartFieldIds } from './utils/dfs';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -33,10 +34,11 @@ export interface ITopoOrdersContext {
 @Injectable()
 export class FieldCalculationService {
   constructor(
-    private readonly batchService: BatchService,
     private readonly prismaService: PrismaService,
+    private readonly databaseRouter: DatabaseRouter,
     private readonly referenceService: ReferenceService,
-    @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
+    @InjectRecordQueryBuilder() private readonly recordQueryBuilder: IRecordQueryBuilder,
+    @InjectModel(DATA_KNEX) private readonly knex: Knex,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
   ) {}
 
@@ -47,7 +49,7 @@ export class FieldCalculationService {
     const directedGraph = customGraph || (await this.referenceService.getFieldGraphItems(fieldIds));
 
     // get all related field by undirected graph
-    const allFieldIds = uniq(this.referenceService.flatGraph(directedGraph).concat(fieldIds));
+    const rawAllFieldIds = uniq(this.referenceService.flatGraph(directedGraph).concat(fieldIds));
 
     // prepare all related data
     const {
@@ -56,16 +58,25 @@ export class FieldCalculationService {
       dbTableName2fields,
       fieldId2DbTableName,
       tableId2DbTableName,
-    } = await this.referenceService.createAuxiliaryData(allFieldIds);
+    } = await this.referenceService.createAuxiliaryData(rawAllFieldIds);
+
+    // Ignore reference edges that point to soft-deleted fields/tables. Auxiliary data only loads
+    // active metadata, so keeping stale nodes here would later desync the graph and field map.
+    const validFieldIds = new Set(Object.keys(fieldMap));
+    const filteredGraph = directedGraph.filter(
+      ({ fromFieldId, toFieldId }) => validFieldIds.has(fromFieldId) && validFieldIds.has(toFieldId)
+    );
+    const startFieldIds = fieldIds.filter((fieldId) => validFieldIds.has(fieldId));
+    const allFieldIds = uniq(this.referenceService.flatGraph(filteredGraph).concat(startFieldIds));
 
     // topological sorting
-    const topoOrders = prependStartFieldIds(getTopoOrders(directedGraph), fieldIds);
+    const topoOrders = prependStartFieldIds(getTopoOrders(filteredGraph), startFieldIds);
 
     return {
-      startFieldIds: fieldIds,
+      startFieldIds,
       allFieldIds,
       fieldMap,
-      directedGraph,
+      directedGraph: filteredGraph,
       topoOrders,
       tableId2DbTableName,
       fieldId2DbTableName,
@@ -76,45 +87,63 @@ export class FieldCalculationService {
 
   private async getRecordsByPage(
     dbTableName: string,
-    dbFieldNames: string[],
+    tableId: string,
+    fields: IFieldInstance[],
     page: number,
     chunkSize: number
   ) {
-    const query = this.knex(dbTableName)
-      .select([...dbFieldNames, ...systemDbFieldNames])
+    const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
+      tableId,
+      viewId: undefined,
+      useQueryModel: true,
+    });
+    const query = qb
       .where((builder) => {
-        dbFieldNames.forEach((fieldNames, index) => {
-          if (index === 0) {
-            builder.whereNotNull(fieldNames);
-          } else {
-            builder.orWhereNotNull(fieldNames);
-          }
-        });
+        fields
+          .filter((field) => !field.isComputed && field.type !== FieldType.Link)
+          .forEach((field, index) => {
+            const dbName = field.dbFieldName;
+            if (index === 0) {
+              builder.whereNotNull(dbName);
+            } else {
+              builder.orWhereNotNull(dbName);
+            }
+          });
       })
       .orderBy('__auto_number')
       .limit(chunkSize)
       .offset(page * chunkSize)
       .toQuery();
-    return this.prismaService
-      .txClient()
-      .$queryRawUnsafe<{ [dbFieldName: string]: unknown }[]>(query);
+    return this.databaseRouter.queryDataPrismaForTable<{ [dbFieldName: string]: unknown }[]>(
+      tableId,
+      query
+    );
   }
 
-  async getRecordsBatchByFields(dbTableName2fields: { [dbTableName: string]: IFieldInstance[] }) {
+  private getBaseIdFromDbTableName(dbTableName: string) {
+    return dbTableName.split('.')[0];
+  }
+
+  async getRecordsBatchByFields(
+    dbTableName2fields: { [dbTableName: string]: IFieldInstance[] },
+    dbTableName2tableId: { [dbTableName: string]: string }
+  ): Promise<{
+    [dbTableName: string]: IRecord[];
+  }> {
     const results: {
       [dbTableName: string]: IRecord[];
     } = {};
     const chunkSize = this.thresholdConfig.calcChunkSize;
     for (const dbTableName in dbTableName2fields) {
+      const tableId = dbTableName2tableId[dbTableName];
       // deduplication is needed
-      const rowCount = await this.getRowCount(dbTableName);
-      const dbFieldNames = dbTableName2fields[dbTableName].map((f) => f.dbFieldName);
+      const rowCount = await this.getRowCount(dbTableName, tableId);
       const totalPages = Math.ceil(rowCount / chunkSize);
       const fields = dbTableName2fields[dbTableName];
 
       const records = await lastValueFrom(
         range(0, totalPages).pipe(
-          concatMap((page) => this.getRecordsByPage(dbTableName, dbFieldNames, page, chunkSize)),
+          concatMap((page) => this.getRecordsByPage(dbTableName, tableId, fields, page, chunkSize)),
           toArray(),
           map((records) => records.flat())
         )
@@ -127,79 +156,17 @@ export class FieldCalculationService {
     return results;
   }
 
-  async calculateFields(tableId: string, fieldIds: string[], recordIds?: string[]) {
-    if (!fieldIds.length) {
-      return undefined;
-    }
-
-    const context = await this.getTopoOrdersContext(fieldIds);
-    await this.calculateChanges(tableId, context, recordIds);
-  }
-
   @Timing()
-  async getRowCount(dbTableName: string) {
+  async getRowCount(dbTableName: string, tableId?: string) {
     const query = this.knex.count('*', { as: 'count' }).from(dbTableName).toQuery();
-    const [{ count }] = await this.prismaService
-      .txClient()
-      .$queryRawUnsafe<{ count: bigint }[]>(query);
+    const [{ count }] = tableId
+      ? await this.databaseRouter.queryDataPrismaForTable<{ count: bigint }[]>(tableId, query)
+      : await this.databaseRouter.queryDataPrismaForBase<{ count: bigint }[]>(
+          this.getBaseIdFromDbTableName(dbTableName),
+          query
+        );
     return Number(count);
   }
 
-  private async getRecordIds(dbTableName: string, page: number, chunkSize: number) {
-    const query = this.knex(dbTableName)
-      .select({ id: '__id' })
-      .orderBy('__auto_number')
-      .limit(chunkSize)
-      .offset(page * chunkSize)
-      .toQuery();
-    const result = await this.prismaService.$queryRawUnsafe<{ id: string }[]>(query);
-    return result.map((item) => item.id);
-  }
-
-  @Timing()
-  private async calculateChanges(
-    tableId: string,
-    context: ITopoOrdersContext,
-    recordIds?: string[]
-  ) {
-    const dbTableName = context.tableId2DbTableName[tableId];
-    const chunkSize = this.thresholdConfig.calcChunkSize;
-    const fieldIds = context.startFieldIds;
-    const taskFunction = async (ids: string[]) =>
-      this.referenceService.calculate({
-        ...context,
-        startZone: Object.fromEntries(fieldIds.map((fieldId) => [fieldId, ids])),
-      });
-
-    if (recordIds && recordIds.length > 0) {
-      await taskFunction(recordIds);
-      return;
-    }
-
-    const rowCount = await this.getRowCount(dbTableName);
-    const totalPages = Math.ceil(rowCount / chunkSize);
-
-    for (let page = 0; page < totalPages; page++) {
-      const ids = await this.getRecordIds(dbTableName, page, chunkSize);
-      await taskFunction(ids);
-    }
-  }
-
-  async calComputedFieldsByRecordIds(tableId: string, recordIds: string[]) {
-    const fieldRaws = await this.prismaService.field.findMany({
-      where: { tableId, isComputed: true, deletedTime: null, hasError: null },
-      select: { id: true },
-    });
-
-    const computedFieldIds = fieldRaws.map((fieldRaw) => fieldRaw.id);
-
-    // calculate by origin ops and link derivation
-    const result = await this.calculateFields(tableId, computedFieldIds, recordIds);
-
-    if (result) {
-      const { opsMap, fieldMap, tableId2DbTableName } = result;
-
-      await this.batchService.updateRecords(opsMap, fieldMap, tableId2DbTableName);
-    }
-  }
+  // Legacy bulk recalculation helpers removed
 }

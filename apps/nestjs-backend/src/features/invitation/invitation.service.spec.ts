@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
 import { getPermissions, Role } from '@teable/core';
@@ -8,6 +8,8 @@ import { CollaboratorType, PrincipalType } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
 import { vi } from 'vitest';
 import { mockDeep, mockReset } from 'vitest-mock-extended';
+import { getError } from '../../../test/utils/get-error';
+import { Events } from '../../event-emitter/events';
 import { GlobalModule } from '../../global/global.module';
 import type { IClsStore } from '../../types/cls';
 import { generateInvitationCode } from '../../utils/code-generate';
@@ -26,11 +28,21 @@ describe('InvitationService', () => {
 
   let invitationService: InvitationService;
   let clsService: ClsService<IClsStore>;
+  let emitAsync: ReturnType<typeof vi.spyOn>;
 
   const mockUser = { id: 'usr1', name: 'John', email: 'john@example.com' };
   const mockSpace = { id: 'spcxxxxxxxx', name: 'Test Space' };
   const mockInvitedUser = { id: 'usr2', name: 'Bob', email: 'bob@example.com' };
-
+  const defaultCls = {
+    user: mockUser,
+    tx: {},
+    origin: {
+      ip: '127.0.0.1',
+      byApi: false,
+      userAgent: 'test',
+      referer: 'test',
+    },
+  };
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [InvitationModule, GlobalModule],
@@ -45,6 +57,10 @@ describe('InvitationService', () => {
 
     clsService = module.get<ClsService<IClsStore>>(ClsService);
     invitationService = module.get<InvitationService>(InvitationService);
+    emitAsync = vi
+      .spyOn(module.get<EventEmitter2>(EventEmitter2), 'emitAsync')
+      .mockResolvedValue([]);
+    emitAsync.mockClear();
 
     prismaService.txClient.mockImplementation(() => {
       return prismaService;
@@ -53,6 +69,8 @@ describe('InvitationService', () => {
     prismaService.$tx.mockImplementation(async (fn, _options) => {
       return await fn(prismaService);
     });
+
+    prismaService.setting.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -62,8 +80,7 @@ describe('InvitationService', () => {
   it('generateInvitation', async () => {
     await clsService.runWith(
       {
-        user: mockUser,
-        tx: {},
+        ...defaultCls,
         permissions: getPermissions(Role.Owner),
       },
       async () => {
@@ -114,8 +131,7 @@ describe('InvitationService', () => {
 
       const result = await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
         async () =>
@@ -134,6 +150,7 @@ describe('InvitationService', () => {
         ],
         spaceId: mockSpace.id,
         role: Role.Owner,
+        skipEvent: true,
       });
 
       expect(prismaService.invitationRecord.create).toHaveBeenCalledWith({
@@ -146,7 +163,23 @@ describe('InvitationService', () => {
           invitationId: mockInvitationId,
         },
       });
-      expect(mailSenderService.sendMail).toHaveBeenCalled();
+      expect(emitAsync).toHaveBeenCalledWith(
+        Events.COLLABORATOR_INVITED,
+        expect.objectContaining({
+          resourceId: mockSpace.id,
+          resourceType: CollaboratorType.Space,
+          createdBy: mockUser.id,
+          invitees: [
+            {
+              principalId: mockInvitedUser.id,
+              principalType: PrincipalType.User,
+              email: mockInvitedUser.email,
+              invitationId: mockInvitationId,
+            },
+          ],
+          skipSendMail: false,
+        })
+      );
       expect(result).toEqual({ [mockInvitedUser.email]: { invitationId: mockInvitationId } });
     });
 
@@ -159,8 +192,7 @@ describe('InvitationService', () => {
 
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
         async () => {
@@ -172,6 +204,8 @@ describe('InvitationService', () => {
           ).rejects.toThrow('tx error');
         }
       );
+
+      expect(emitAsync).not.toHaveBeenCalledWith(Events.COLLABORATOR_INVITED, expect.anything());
     });
   });
 
@@ -199,8 +233,7 @@ describe('InvitationService', () => {
 
       const result = await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Creator),
         },
         async () =>
@@ -219,6 +252,7 @@ describe('InvitationService', () => {
         ],
         baseId: 'base1',
         role: Role.Creator,
+        skipEvent: true,
       });
       expect(prismaService.invitationRecord.create).toHaveBeenCalledWith({
         data: {
@@ -230,7 +264,23 @@ describe('InvitationService', () => {
           invitationId: mockInvitationId,
         },
       });
-      expect(mailSenderService.sendMail).toHaveBeenCalled();
+      expect(emitAsync).toHaveBeenCalledWith(
+        Events.COLLABORATOR_INVITED,
+        expect.objectContaining({
+          resourceId: 'base1',
+          resourceType: CollaboratorType.Base,
+          createdBy: mockUser.id,
+          invitees: [
+            {
+              principalId: mockInvitedUser.id,
+              principalType: PrincipalType.User,
+              email: mockInvitedUser.email,
+              invitationId: mockInvitationId,
+            },
+          ],
+          skipSendMail: false,
+        })
+      );
       expect(result).toEqual({ [mockInvitedUser.email]: { invitationId: mockInvitationId } });
     });
 
@@ -242,9 +292,14 @@ describe('InvitationService', () => {
       vi.spyOn(invitationService as any, 'checkSpaceInvitation').mockResolvedValue(true);
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
+          origin: {
+            ip: '127.0.0.1',
+            byApi: false,
+            userAgent: 'test',
+            referer: 'test',
+          },
         },
         async () => {
           await expect(
@@ -255,6 +310,68 @@ describe('InvitationService', () => {
           ).rejects.toThrow('tx error');
         }
       );
+
+      expect(emitAsync).not.toHaveBeenCalledWith(Events.COLLABORATOR_INVITED, expect.anything());
+    });
+  });
+
+  describe('banned email domains', () => {
+    beforeEach(() => {
+      prismaService.space.findFirst.mockResolvedValue(mockSpace as any);
+      prismaService.setting.findMany.mockResolvedValue([
+        { name: 'bannedEmailDomains', content: JSON.stringify(['tankmail.cn']) },
+      ] as any);
+      vi.spyOn(invitationService as any, 'generateInvitation').mockResolvedValue({
+        id: mockInvitationId,
+        invitationCode: mockInvitationCode,
+      } as any);
+      collaboratorService.validateUserAddRole.mockResolvedValue();
+    });
+
+    it('should drop banned-domain invitees without creating accounts or sending mail', async () => {
+      prismaService.user.findMany.mockResolvedValue([mockInvitedUser as any]);
+
+      const result = await clsService.runWith(
+        {
+          ...defaultCls,
+          permissions: getPermissions(Role.Owner),
+        },
+        async () =>
+          await invitationService.emailInvitationBySpace(mockSpace.id, {
+            emails: [mockInvitedUser.email, 'spammer@tankmail.cn'],
+            role: Role.Owner,
+          })
+      );
+
+      expect(prismaService.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { email: { in: [mockInvitedUser.email] } } })
+      );
+      expect(prismaService.user.create).not.toHaveBeenCalled();
+      expect(result).toEqual({ [mockInvitedUser.email]: { invitationId: mockInvitationId } });
+    });
+
+    it('should mark the invited event skipSendMail when the inviter email domain is banned', async () => {
+      prismaService.user.findMany.mockResolvedValue([mockInvitedUser as any]);
+
+      const result = await clsService.runWith(
+        {
+          ...defaultCls,
+          user: { ...mockUser, email: 'inviter@tankmail.cn' },
+          permissions: getPermissions(Role.Owner),
+        },
+        async () =>
+          await invitationService.emailInvitationBySpace(mockSpace.id, {
+            emails: [mockInvitedUser.email],
+            role: Role.Owner,
+          })
+      );
+
+      expect(collaboratorService.createSpaceCollaborator).toHaveBeenCalled();
+      expect(emitAsync).toHaveBeenCalledWith(
+        Events.COLLABORATOR_INVITED,
+        expect.objectContaining({ skipSendMail: true })
+      );
+      expect(result).toEqual({ [mockInvitedUser.email]: { invitationId: mockInvitationId } });
     });
   });
 
@@ -272,14 +389,17 @@ describe('InvitationService', () => {
 
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
-        async () =>
-          await expect(() =>
+        async () => {
+          const error = await getError(() =>
             invitationService.acceptInvitationLink(errorAcceptInvitationLinkRo)
-          ).rejects.toThrow(BadRequestException)
+          );
+          expect(error).toBeDefined();
+          expect(error?.status).toBe(400);
+          expect(error?.message).toBe('Invalid invitation code');
+        }
       );
     });
     it('should throw NotFoundException for not found link invitation', async () => {
@@ -287,14 +407,17 @@ describe('InvitationService', () => {
 
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
-        async () =>
-          await expect(() =>
+        async () => {
+          const error = await getError(() =>
             invitationService.acceptInvitationLink(acceptInvitationLinkRo)
-          ).rejects.toThrow(NotFoundException)
+          );
+          expect(error).toBeDefined();
+          expect(error?.status).toBe(404);
+          expect(error?.message).toBe('Invitation link not found');
+        }
       );
     });
     it('should throw ForbiddenException for expired link', async () => {
@@ -314,14 +437,17 @@ describe('InvitationService', () => {
       });
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
-        async () =>
-          await expect(() =>
+        async () => {
+          const error = await getError(() =>
             invitationService.acceptInvitationLink(acceptInvitationLinkRo)
-          ).rejects.toThrow(ForbiddenException)
+          );
+          expect(error).toBeDefined();
+          expect(error?.status).toBe(400);
+          expect(error?.message).toBe('Invitation link has expired');
+        }
       );
     });
     it('should return success for email', async () => {
@@ -342,8 +468,7 @@ describe('InvitationService', () => {
       prismaService.collaborator.count.mockImplementation(() => Promise.resolve(0) as any);
       await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
         async () => await invitationService.acceptInvitationLink(acceptInvitationLinkRo)
@@ -355,8 +480,7 @@ describe('InvitationService', () => {
       prismaService.collaborator.count.mockResolvedValue(1);
       const result = await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
         async () => await invitationService.acceptInvitationLink(acceptInvitationLinkRo)
@@ -383,8 +507,7 @@ describe('InvitationService', () => {
 
       const result = await clsService.runWith(
         {
-          user: mockUser,
-          tx: {},
+          ...defaultCls,
           permissions: getPermissions(Role.Owner),
         },
         async () => await invitationService.acceptInvitationLink(acceptInvitationLinkRo)
@@ -410,6 +533,7 @@ describe('InvitationService', () => {
         spaceId: mockSpace.id,
         role: Role.Owner,
         createdBy: 'createdBy',
+        skipEvent: true,
       });
       expect(result.spaceId).toEqual(mockInvitation.spaceId);
     });

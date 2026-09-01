@@ -21,9 +21,11 @@ import {
   tomorrow,
   yesterday,
   exactDate as exactDateConst,
+  exactFormatDate,
 } from '@teable/core';
 import { getRecords, getUserCollaborators } from '@teable/openapi';
 import { keyBy } from 'lodash';
+import { isFilterItemEffective } from '../components/filter/view-filter/utils';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const VALIDATE_FILTER_OPERATORS = [is.value, isExactly.value, contains.value, hasAllOf.value];
@@ -84,10 +86,9 @@ export const generateValueByFilteredField = ({
         yesterday.setDate(now.getDate() - 1);
         return yesterday.toISOString();
       }
-      if (mode === exactDateConst.value) {
+      if (mode === exactDateConst.value || mode === exactFormatDate.value) {
         return exactDate;
       }
-
       return null;
     }
     case FieldType.User: {
@@ -144,6 +145,10 @@ export const extractDefaultFieldsFromFilters = async ({
     }
 
     const field = fieldMap[fieldId];
+
+    if (!isFilterItemEffective({ value, operator: operator as string }, field)) {
+      return;
+    }
 
     if (fieldId in result) {
       delete result[fieldId];

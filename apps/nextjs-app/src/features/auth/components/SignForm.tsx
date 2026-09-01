@@ -15,11 +15,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import type { FC } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ZodIssue } from 'zod';
 import { fromZodError } from 'zod-validation-error';
+import { trackSignUp } from '@/components/google-ads';
+import { useCutDown } from '@/features/app/hooks/useCutDown';
+import { useEnv } from '@/features/app/hooks/useEnv';
+import { usePublicSettingQuery } from '@/features/app/hooks/useSetting';
 import { authConfig } from '../../i18n/auth.config';
 import { SendVerificationButton } from './SendVerificationButton';
+import TurnstileWidget from './TurnstileWidget';
 
 export interface ISignForm {
   className?: string;
@@ -32,15 +37,40 @@ export const SignForm: FC<ISignForm> = (props) => {
   const [signupVerificationToken, setSignupVerificationToken] = useState<string>();
   const [signupVerificationCode, setSignupVerificationCode] = useState<string>();
   const router = useRouter();
-
+  const [inviteCode, setInviteCode] = useState<string>(router.query.inviteCode as string);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string>();
+  const { countdown, setCountdown } = useCutDown();
+  const [turnstileKey, setTurnstileKey] = useState<number>(0);
+  const env = useEnv();
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  const { data: setting } = usePublicSettingQuery();
+  const {
+    enableWaitlist = false,
+    turnstileSiteKey,
+    signupVerificationSendCodeMailRate = 0,
+  } = setting ?? {};
+
+  const joinWaitlist = useCallback(() => {
+    if (enableWaitlist) {
+      const email = emailRef.current?.value;
+      const url = email ? `/waitlist?email=${email}` : '/waitlist';
+      router.push(url);
+    }
+  }, [enableWaitlist, router]);
 
   useEffect(() => {
     setSignupVerificationCode(undefined);
     setSignupVerificationToken(undefined);
     setError(undefined);
+    setTurnstileToken(undefined);
+    setCountdown(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
+
+  // Countdown timer for send verification code button
 
   const { mutate: submitMutation } = useMutation({
     mutationFn: ({ type, form }: { type: 'signin' | 'signup'; form: ISignin }) => {
@@ -48,6 +78,7 @@ export const SignForm: FC<ISignForm> = (props) => {
         return signin(form);
       }
       if (type === 'signup') {
+        // Affiliate attribution rides the teable_affiliate_via cookie, not this payload.
         return signup({
           ...form,
           refMeta: {
@@ -66,6 +97,13 @@ export const SignForm: FC<ISignForm> = (props) => {
           if (error.data && typeof error.data === 'object' && 'token' in error.data) {
             setSignupVerificationToken(error.data.token as string);
             setError(undefined);
+            // Start countdown based on configured rate limit (only if configured)
+            if (
+              typeof signupVerificationSendCodeMailRate === 'number' &&
+              signupVerificationSendCodeMailRate > 0
+            ) {
+              setCountdown(signupVerificationSendCodeMailRate);
+            }
           } else {
             setError(error.message);
           }
@@ -89,24 +127,72 @@ export const SignForm: FC<ISignForm> = (props) => {
         default:
           setError(error.message);
       }
+      // Reset turnstile token on any error to force re-verification
+      setTurnstileToken(undefined);
+      setTurnstileKey((prev) => prev + 1);
       setIsLoading(false);
       return true;
     },
     meta: {
       preventGlobalError: true,
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
+      // Reset turnstile token after successful submission
+      setTurnstileToken(undefined);
+      setTurnstileKey((prev) => prev + 1);
+
+      // Cross-domain GA4 signup event (Google Ads conversions upload server-side)
+      if (variables.type === 'signup' && data.data) {
+        trackSignUp({
+          marketingGaId: env.marketingGaId,
+          userInfo: {
+            id: data.data.id,
+            email: data.data.email,
+            name: data.data.name,
+          },
+        });
+      }
+
       onSuccess?.();
     },
   });
 
   const {
     mutate: sendSignupVerificationCodeMutation,
-    isLoading: sendSignupVerificationCodeLoading,
+    isPending: sendSignupVerificationCodeLoading,
   } = useMutation({
-    mutationFn: (email: string) => sendSignupVerificationCode(email),
+    mutationFn: ({ email, turnstileToken }: { email: string; turnstileToken?: string }) =>
+      sendSignupVerificationCode(email, turnstileToken),
     onSuccess: (data) => {
       setSignupVerificationToken(data.data.token);
+      // Start countdown based on configured rate limit (only if configured)
+      if (
+        typeof signupVerificationSendCodeMailRate === 'number' &&
+        signupVerificationSendCodeMailRate > 0
+      ) {
+        setCountdown(signupVerificationSendCodeMailRate);
+      }
+      // Reset turnstile token and force widget refresh
+      setTurnstileToken(undefined);
+      setTurnstileKey((prev) => prev + 1);
+    },
+    onError: (error: HttpError) => {
+      // Reset turnstile on error
+      setTurnstileToken(undefined);
+      setTurnstileKey((prev) => prev + 1);
+      if (
+        error.code === HttpErrorCode.TOO_MANY_REQUESTS &&
+        error.data &&
+        typeof error.data === 'object' &&
+        'seconds' in error.data
+      ) {
+        setError(t('auth:signupError.sendMailRateLimit', { seconds: error.data.seconds }));
+        return;
+      }
+      setError(error.message);
+    },
+    meta: {
+      preventGlobalError: true,
     },
   });
 
@@ -118,7 +204,9 @@ export const SignForm: FC<ISignForm> = (props) => {
           if (code === 'too_small') {
             return { error: t('auth:signupError.passwordLength') };
           }
-          if (code === 'invalid_string') {
+          // In Zod 4.x, string validation errors may use different codes
+          // Check for common validation failure codes
+          if (code === 'invalid_format' || code === 'custom') {
             return { error: t('auth:signupError.passwordInvalid') };
           }
         }
@@ -146,6 +234,21 @@ export const SignForm: FC<ISignForm> = (props) => {
 
   const showVerificationCode = type === 'signup' && signupVerificationToken;
 
+  // Turnstile callbacks
+  const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);
+  const handleTurnstileError = useCallback(() => {
+    setTurnstileToken(undefined);
+    setError(t('auth:signError.turnstileError'));
+  }, [t]);
+  const handleTurnstileExpire = useCallback(() => {
+    setTurnstileToken(undefined);
+    setError(t('auth:signError.turnstileExpired'));
+  }, [t]);
+  const handleTurnstileTimeout = useCallback(() => {
+    setTurnstileToken(undefined);
+    setError(t('auth:signError.turnstileTimeout'));
+  }, [t]);
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -153,10 +256,15 @@ export const SignForm: FC<ISignForm> = (props) => {
     const password = (event.currentTarget.elements.namedItem('password') as HTMLInputElement).value;
     const code = (event.currentTarget.elements.namedItem('verification-code') as HTMLInputElement)
       ?.value;
+    const inviteCode = (event.currentTarget.elements.namedItem('invite-code') as HTMLInputElement)
+      ?.value;
+
     const form = {
       email,
       password,
       verification: code ? { code, token: signupVerificationToken } : undefined,
+      inviteCode: enableWaitlist ? inviteCode : undefined,
+      turnstileToken: turnstileToken,
     };
 
     const { error } = validation(form);
@@ -167,6 +275,12 @@ export const SignForm: FC<ISignForm> = (props) => {
 
     if (showVerificationCode && !signupVerificationCode) {
       setError(t('auth:signupError.verificationCodeRequired'));
+      return;
+    }
+
+    // Check Turnstile verification if enabled
+    if (turnstileSiteKey && !turnstileToken) {
+      setError(t('auth:signError.turnstileRequired'));
       return;
     }
 
@@ -191,20 +305,22 @@ export const SignForm: FC<ISignForm> = (props) => {
         className
       )}
     >
-      <div className="relative mb-4 text-muted-foreground">
-        <h2 className="text-center text-xl">
+      <div className="relative mb-6 text-muted-foreground">
+        <h2 className="text-start text-base">
           {type === 'signin' ? t('auth:title.signin') : t('auth:title.signup')}
         </h2>
       </div>
       <form className="relative" onSubmit={onSubmit} onChange={() => setError(undefined)}>
-        <div className="grid gap-3">
-          <div className="grid gap-3">
+        <div className="grid gap-4">
+          <div className="grid gap-2">
             <Label htmlFor="email">{t('auth:label.email')}</Label>
             <Input
+              className="h-9 sm:h-8"
               id="email"
               placeholder={t('auth:placeholder.email')}
               type="text"
               autoComplete="username"
+              ref={emailRef}
               onChange={() => {
                 setSignupVerificationCode(undefined);
                 setSignupVerificationToken(undefined);
@@ -212,11 +328,12 @@ export const SignForm: FC<ISignForm> = (props) => {
               disabled={isLoading}
             />
           </div>
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">{t('auth:label.password')}</Label>
             </div>
             <Input
+              className="h-9 sm:h-8"
               id="password"
               placeholder={t('auth:placeholder.password')}
               type="password"
@@ -225,7 +342,7 @@ export const SignForm: FC<ISignForm> = (props) => {
             />
             {type === 'signin' && (
               <Link
-                className="absolute right-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                className="absolute end-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
                 href="/auth/forget-password"
               >
                 {t('auth:forgetPassword.trigger')}
@@ -233,63 +350,95 @@ export const SignForm: FC<ISignForm> = (props) => {
             )}
           </div>
 
-          <div
-            data-state={showVerificationCode ? 'show' : 'hide'}
-            className={cn('transition-all data-[state=show]:mt-4', {
-              'h-0 overflow-hidden': !showVerificationCode,
-            })}
-          >
-            {showVerificationCode && (
-              <div className="grid gap-3">
-                <Label htmlFor="verification-code">{t('auth:label.verificationCode')}</Label>
+          {enableWaitlist && type === 'signup' && (
+            <div className="grid gap-3">
+              <Label htmlFor="invite-code">{t('common:waitlist.code')}</Label>
+              <div className="flex items-center">
                 <Input
-                  id="verification-code"
+                  className="h-9 sm:h-8"
+                  id="invite-code"
                   type="text"
-                  placeholder={t('auth:placeholder.verificationCode')}
-                  value={signupVerificationCode}
-                  onChange={(e) => setSignupVerificationCode(e.target.value)}
+                  placeholder={t('common:waitlist.inviteCodePlaceholder')}
+                  autoComplete="off"
+                  disabled={isLoading}
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
                 />
-                <SendVerificationButton
-                  disabled={sendSignupVerificationCodeLoading}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const emailInput = e.currentTarget.form?.querySelector(
-                      '#email'
-                    ) as HTMLInputElement;
-                    const email = emailInput?.value;
-                    if (!email) {
-                      return;
-                    }
-                    const res = sendSignupVerificationCodeRoSchema.safeParse({ email });
-                    if (!res.success) {
-                      setError(fromZodError(res.error).message);
-                      return;
-                    }
-                    sendSignupVerificationCodeMutation(email);
-                  }}
-                  loading={sendSignupVerificationCodeLoading}
-                />
+                <Button variant="link" className="p-2 text-xs" type="button" onClick={joinWaitlist}>
+                  {t('common:waitlist.join')}
+                </Button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {showVerificationCode && (
+            <div className="mt-4 grid gap-3">
+              <Label htmlFor="verification-code">{t('auth:label.verificationCode')}</Label>
+              <Input
+                className="h-9 sm:h-8"
+                id="verification-code"
+                type="text"
+                placeholder={t('auth:placeholder.verificationCode')}
+                value={signupVerificationCode}
+                onChange={(e) => setSignupVerificationCode(e.target.value)}
+              />
+              <SendVerificationButton
+                disabled={sendSignupVerificationCodeLoading || countdown > 0}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const emailInput = e.currentTarget.form?.querySelector(
+                    '#email'
+                  ) as HTMLInputElement;
+                  const email = emailInput?.value;
+                  if (!email) {
+                    return;
+                  }
+
+                  // Check Turnstile verification if enabled
+                  if (turnstileSiteKey && !turnstileToken) {
+                    setError(t('auth:signError.turnstileRequired'));
+                    return;
+                  }
+
+                  const res = sendSignupVerificationCodeRoSchema.safeParse({
+                    email,
+                    turnstileToken,
+                  });
+                  if (!res.success) {
+                    setError(fromZodError(res.error).message);
+                    return;
+                  }
+                  sendSignupVerificationCodeMutation({ email, turnstileToken });
+                }}
+                loading={sendSignupVerificationCodeLoading}
+                countdown={countdown}
+              />
+            </div>
+          )}
+
+          {/* Turnstile Widget */}
+          {turnstileSiteKey && (
+            <div className="flex justify-center">
+              <TurnstileWidget
+                key={turnstileKey}
+                siteKey={turnstileSiteKey}
+                onVerify={handleTurnstileVerify}
+                onError={handleTurnstileError}
+                onExpire={handleTurnstileExpire}
+                onTimeout={handleTurnstileTimeout}
+                action={type}
+                theme="auto"
+                size="normal"
+              />
+            </div>
+          )}
+
           <div>
             <Button className="w-full" disabled={isLoading}>
               {isLoading && <Spin />}
               {buttonText}
             </Button>
-            <div className="flex justify-end py-2">
-              <Link
-                href={{
-                  pathname: type === 'signin' ? '/auth/signup' : '/auth/login',
-                  query: { ...router.query },
-                }}
-                shallow
-                className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-              >
-                {type === 'signin' ? t('auth:button.signup') : t('auth:button.signin')}
-              </Link>
-            </div>
             <ErrorCom error={error} />
           </div>
         </div>

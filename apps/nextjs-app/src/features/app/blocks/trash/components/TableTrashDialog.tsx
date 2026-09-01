@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { resetTrashItems, ResourceType } from '@teable/openapi';
+import { Clean } from '@teable/icons';
+import { resetTrashItems, TrashType } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
-import { useBasePermission, useTableId } from '@teable/sdk/hooks';
+import { useBasePermission } from '@teable/sdk/hooks';
 import { ConfirmDialog } from '@teable/ui-lib/base';
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@teable/ui-lib/shadcn';
 import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
@@ -13,11 +14,11 @@ import { TableTrash } from './TableTrash';
 interface ITableTrashDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  tableId: string;
 }
 
 export const TableTrashDialog = (props: ITableTrashDialogProps) => {
-  const { open, onOpenChange } = props;
-  const tableId = useTableId() as string;
+  const { open, onOpenChange, tableId } = props;
   const permission = useBasePermission();
   const queryClient = useQueryClient();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
@@ -27,9 +28,9 @@ export const TableTrashDialog = (props: ITableTrashDialogProps) => {
   const hasResetPermission = permission?.['table|trash_reset'];
 
   const { mutateAsync: mutateResetTrash } = useMutation({
-    mutationFn: () => resetTrashItems({ resourceType: ResourceType.Table, resourceId: tableId }),
+    mutationFn: () => resetTrashItems({ resourceType: TrashType.Table, resourceId: tableId }),
     onSuccess: () => {
-      queryClient.invalidateQueries(ReactQueryKeys.getTrashItems(tableId));
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.getTrashItems(tableId) });
       toast.success(t('actions.resetSucceed'));
     },
   });
@@ -42,16 +43,17 @@ export const TableTrashDialog = (props: ITableTrashDialogProps) => {
             <DialogTitle className="flex items-center">{t('table:tableTrash.title')}</DialogTitle>
             {hasResetPermission && (
               <Button
-                size="xs"
-                className="mr-8"
-                variant="secondary"
+                size="sm"
+                className="me-8"
+                variant="outline"
                 onClick={() => setConfirmVisible(true)}
               >
+                <Clean className="size-4 shrink-0" />
                 {t('trash.resetTrash')}
               </Button>
             )}
           </DialogHeader>
-          <TableTrash />
+          <TableTrash tableId={tableId} />
         </DialogContent>
       </Dialog>
       <ConfirmDialog

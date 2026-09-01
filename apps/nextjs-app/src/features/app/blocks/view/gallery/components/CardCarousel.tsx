@@ -1,4 +1,5 @@
 import type { IAttachmentCellValue } from '@teable/core';
+import { useTheme } from '@teable/next-themes';
 import { isSystemFileIcon, getFileCover } from '@teable/sdk/components';
 import { useAttachmentPreviewI18Map } from '@teable/sdk/components/hooks';
 import { FilePreviewProvider, FilePreviewItem } from '@teable/ui-lib/base';
@@ -20,7 +21,7 @@ interface ICardCarouselProps {
 export const CardCarousel = (props: ICardCarouselProps) => {
   const { value, isCoverFit } = props;
   const i18nMap = useAttachmentPreviewI18Map();
-
+  const { resolvedTheme } = useTheme();
   return (
     <FilePreviewProvider i18nMap={i18nMap}>
       <Carousel
@@ -31,15 +32,17 @@ export const CardCarousel = (props: ICardCarouselProps) => {
         }}
         className="border-b"
       >
-        <CarouselContent className="ml-0">
+        <CarouselContent className="ms-0">
           {value.map(({ id, name, size, mimetype, presignedUrl, lgThumbnailUrl }) => {
             const isSystemFile = isSystemFileIcon(mimetype);
-            const url = lgThumbnailUrl ?? getFileCover(mimetype, presignedUrl);
+            const url =
+              lgThumbnailUrl ??
+              getFileCover(mimetype, presignedUrl, resolvedTheme as 'light' | 'dark');
             return (
               <CarouselItem
                 key={id}
                 style={{ height: CARD_COVER_HEIGHT }}
-                className="relative size-full pl-0"
+                className="relative size-full ps-0"
               >
                 <FilePreviewItem
                   key={id}
@@ -64,8 +67,8 @@ export const CardCarousel = (props: ICardCarouselProps) => {
         </CarouselContent>
         {value.length > 1 && (
           <Fragment>
-            <CarouselPrevious className="left-1 size-7" onClick={(e) => e.stopPropagation()} />
-            <CarouselNext className="right-1 size-7" onClick={(e) => e.stopPropagation()} />
+            <CarouselPrevious className="start-1 size-7" onClick={(e) => e.stopPropagation()} />
+            <CarouselNext className="end-1 size-7" onClick={(e) => e.stopPropagation()} />
           </Fragment>
         )}
       </Carousel>

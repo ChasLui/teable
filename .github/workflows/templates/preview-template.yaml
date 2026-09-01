@@ -64,7 +64,8 @@ spec:
       initContainers:
         - name: db-migrate
           image: >-
-            __DB_MIGRATE_IMAGE_REPOSITORY__:__IMAGE_TAG__
+            __MAIN_IMAGE_REPOSITORY__:__IMAGE_TAG__
+          args: ['migrate-only']
           env:
             - name: PG_PASSWORD
               valueFrom:
@@ -92,6 +93,7 @@ spec:
         - name: teable-__INSTANCE_NAME__
           image: >-
             __MAIN_IMAGE_REPOSITORY__:__IMAGE_TAG__
+          args: ['skip-migrate']
           env:
             - name: PG_PASSWORD
               valueFrom:
@@ -108,6 +110,8 @@ spec:
                 postgresql://postgres:$(PG_PASSWORD)@teable-__INSTANCE_NAME__-pg-postgresql.ns-__NAMESPACE__.svc:$(PG_PORT)/teable
             - name: PUBLIC_ORIGIN
               value: https://__INSTANCE_DOMAIN__.sealoshzh.site
+            - name: LOG_LEVEL
+              value: debug
             - name: BACKEND_JWT_SECRET
               value: exdpbfxmlqhjnqxu
             - name: BACKEND_SESSION_SECRET
@@ -177,8 +181,6 @@ spec:
             - name: BACKEND_CACHE_REDIS_URI
               value: >-
                 redis://$(REDIS_USERNAME):$(REDIS_PASSWORD)@$(REDIS_HOST).ns-__NAMESPACE__.svc:$(REDIS_PORT)/1
-            - name: NEXT_ENV_IMAGES_ALL_REMOTE
-              value: 'true'
           resources:
             requests:
               cpu: 200m

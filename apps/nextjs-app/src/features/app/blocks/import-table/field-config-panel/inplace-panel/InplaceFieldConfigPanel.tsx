@@ -1,12 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import type { IInplaceImportOptionRo, IImportOptionRo } from '@teable/openapi';
-import {
-  getTableById as apiGetTableById,
-  getFields as apiGetFields,
-  getTablePermission,
-} from '@teable/openapi';
+import { getTableById as apiGetTableById, getFields as apiGetFields } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
-import { useBaseId } from '@teable/sdk/hooks';
+import { useBaseId, useContentDir } from '@teable/sdk/hooks';
 import { isEqual } from 'lodash';
 import { useTranslation } from 'next-i18next';
 import { useMemo } from 'react';
@@ -29,6 +25,7 @@ export type IInplaceOption = Pick<
 const InplaceFieldConfigPanel = (props: IInplaceFieldConfigPanel) => {
   const baseId = useBaseId() as string;
   const { t } = useTranslation(['table']);
+  const contentDir = useContentDir();
   const { tableId, workSheets, insertConfig, onChange, errorMessage } = props;
 
   const options: IInplaceOption = useMemo(
@@ -49,19 +46,7 @@ const InplaceFieldConfigPanel = (props: IInplaceFieldConfigPanel) => {
     queryFn: () => apiGetFields(tableId).then((data) => data.data),
   });
 
-  const { data: tablePermission } = useQuery({
-    queryKey: ReactQueryKeys.getTablePermission(baseId!, tableId!),
-    queryFn: ({ queryKey }) => getTablePermission(queryKey[1], queryKey[2]).then((res) => res.data),
-    enabled: !!tableId,
-  });
-
-  const hasReadPermissionFields = Object.entries(tablePermission?.field?.fields || {})
-    .filter(([, value]) => {
-      return value['field|read'];
-    })
-    .map(([key]) => key);
-
-  const fieldWithPermission = fields?.filter(({ id }) => hasReadPermissionFields.includes(id));
+  const fieldWithPermission = fields?.filter(({ recordRead }) => recordRead !== false);
 
   const optionHandler = (value: IInplaceOption, propertyName: keyof IInplaceOption) => {
     const newInsertConfig = {
@@ -96,7 +81,7 @@ const InplaceFieldConfigPanel = (props: IInplaceFieldConfigPanel) => {
       <div>
         <p className="text-base font-bold">
           {t('table:import.title.incrementImportTitle')}
-          {table?.name}
+          <span dir={contentDir}>{table?.name}</span>
         </p>
       </div>
 
@@ -111,7 +96,7 @@ const InplaceFieldConfigPanel = (props: IInplaceFieldConfigPanel) => {
         </div>
       )}
 
-      {errorMessage && <p className="pl-2 text-sm text-red-500">{errorMessage}</p>}
+      {errorMessage && <p className="ps-2 text-sm text-red-500">{errorMessage}</p>}
 
       <InplaceImportOptionPanel
         options={options}

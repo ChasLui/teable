@@ -1,73 +1,107 @@
-import { useMutation } from '@tanstack/react-query';
+import { Eye } from '@teable/icons';
 import type { ITemplateVo } from '@teable/openapi';
-import { createBaseFromTemplate } from '@teable/openapi';
-import { Button, useToast } from '@teable/ui-lib/shadcn';
-import { useRouter } from 'next/router';
+import { cn } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'react-i18next';
-import { useSpaceId } from './hooks/use-space-id';
+import type { ITemplateBaseProps } from './TemplateMain';
 
-interface ITemplateCardProps {
+interface ITemplateCardProps extends Pick<ITemplateBaseProps, 'onClickTemplateCardHandler'> {
   template: ITemplateVo;
+  size: 'xs' | 'sm' | 'md' | 'lg';
+  className?: string;
+  /** PostHog autocapture marker (autocapture is allowlisted to `[data-attr]` elements). */
+  dataAttr?: string;
 }
 
-export const TemplateCard = ({ template }: ITemplateCardProps) => {
-  const { name, description, cover, usageCount, id: templateId } = template;
-  const { presignedUrl } = cover ?? {};
-  const { t } = useTranslation('common');
-  const router = useRouter();
-  const spaceId = useSpaceId();
-  const { toast } = useToast();
+const AspectRatioMap = {
+  xs: 'aspect-[16/10]',
+  sm: 'aspect-[16/10]',
+  md: 'aspect-[16/9]',
+  lg: 'aspect-[16/9]',
+};
 
-  const { mutateAsync: createTemplateToBase } = useMutation({
-    mutationFn: () =>
-      createBaseFromTemplate({
-        spaceId: spaceId as string,
-        templateId,
-        withRecords: true,
-      }),
-    onSuccess: (res) => {
-      const { id: baseId } = res.data;
-      router.push(`/base/${baseId}`);
-    },
-  });
+export const TemplateCard = ({
+  template,
+  onClickTemplateCardHandler,
+  size = 'sm',
+  className,
+  dataAttr,
+}: ITemplateCardProps) => {
+  const { name, description, cover, visitCount, id: templateId } = template;
+  const { presignedUrl } = cover ?? {};
+  const { t, i18n } = useTranslation(['common']);
+
+  const formatCount = (count: number) =>
+    Intl.NumberFormat([i18n.language, 'en'], { notation: 'compact' }).format(count);
 
   return (
-    <div className="group relative flex h-[306px] w-[300px] cursor-pointer flex-col rounded-sm border p-0 hover:shadow-md">
-      <div className="h-48 w-full shrink-0 bg-secondary">
-        {presignedUrl && (
-          <img src={presignedUrl} className="size-full object-contain" alt="preview" />
+    <div
+      className={cn('relative flex w-full shrink-0 cursor-pointer flex-col', className)}
+      role="button"
+      tabIndex={0}
+      data-attr={dataAttr}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClickTemplateCardHandler?.(templateId);
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          onClickTemplateCardHandler?.(templateId);
+        }
+      }}
+    >
+      <div
+        className={cn(
+          'group w-full shrink-0 overflow-hidden rounded-lg border bg-secondary p-0 transition-shadow hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.08),0_3px_6px_-2px_rgba(0,0,0,0.08)]',
+          AspectRatioMap[size]
+        )}
+      >
+        {presignedUrl ? (
+          <img
+            src={presignedUrl}
+            className="size-full object-cover transition-all duration-300 group-hover:scale-105"
+            alt="preview"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
+            <span className="text-sm text-muted-foreground">
+              {t('settings.templateAdmin.noImage')}
+            </span>
+          </div>
         )}
       </div>
-      <div className="relative flex w-full flex-1 flex-col items-start gap-1 px-4 py-2 text-sm">
-        <div className="h-4 shrink-0 font-medium">{name}</div>
-        <div
-          className="line-clamp-3 text-wrap text-start text-xs text-gray-500"
+
+      <div
+        className={cn('flex flex-1 flex-col gap-1 px-1 pt-2 text-base', {
+          'text-sm pt-1 gap-0.5': size === 'xs',
+        })}
+      >
+        <h2
+          className={cn('flex items-center justify-between gap-3', {
+            'gap-2': size === 'xs',
+          })}
+        >
+          <span className="truncate font-medium" title={name}>
+            {name}
+          </span>
+
+          <div
+            className={cn('flex shrink-0 items-center gap-2 text-muted-foreground text-sm', {
+              'text-xs gap-1': size === 'xs',
+            })}
+          >
+            <Eye className="size-4" />
+            <span>{formatCount(visitCount)}</span>
+          </div>
+        </h2>
+        <p
+          className={cn('m-0 flex-1 overflow-hidden truncate text-muted-foreground text-sm', {
+            'text-xs': size === 'xs',
+          })}
           title={description}
         >
           {description}
-        </div>
-        <div className="absolute bottom-0 left-0 w-full rounded-b-sm bg-gray-50 px-4 py-1.5 text-xs text-gray-500">
-          {t('settings.templateAdmin.usageCount', { count: usageCount })}
-        </div>
-      </div>
-
-      <div className="absolute bottom-0 z-10 hidden w-full justify-around bg-secondary p-2 opacity-80 group-hover:flex">
-        {/* <Button variant={'outline'} size={'sm'} className="w-24">
-          {t('settings.templateAdmin.actions.preview')}
-        </Button> */}
-        <Button
-          variant={'outline'}
-          size={'sm'}
-          className="w-24"
-          onClick={() => {
-            spaceId && createTemplateToBase();
-            toast({
-              title: t('settings.templateAdmin.importing'),
-            });
-          }}
-        >
-          {t('settings.templateAdmin.actions.use')}
-        </Button>
+        </p>
       </div>
     </div>
   );

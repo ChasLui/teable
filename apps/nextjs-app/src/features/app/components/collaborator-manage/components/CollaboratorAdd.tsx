@@ -40,7 +40,7 @@ export const CollaboratorAdd = (props: ICollaboratorAddProps) => {
   const filteredBaseRoleStatic = useFilteredBaseRoleStatic(currentRole);
   const [selectedMembers, setSelectedMembers] = useState<ISelectedMember[]>([]);
 
-  const { mutate: addCollaborators, isLoading } = useMutation({
+  const { mutate: addCollaborators, isPending: isLoading } = useMutation({
     mutationFn: async (collaborators: IAddCollaborator[]) => {
       const userCollaborators = collaborators.filter((c) => c.principalType === PrincipalType.User);
       const departmentCollaborators = collaborators.filter(
@@ -131,7 +131,7 @@ export const CollaboratorAdd = (props: ICollaboratorAddProps) => {
               memberSelectorRef.current?.open();
             }}
           >
-            <Plus />
+            <Plus className="size-4 shrink-0" />
             {t('common:invite.addOrgCollaborator.placeholder')}
           </Button>
         </div>
@@ -155,7 +155,7 @@ export const CollaboratorAdd = (props: ICollaboratorAddProps) => {
                     deleteMember(member.id);
                   }}
                 >
-                  <X />
+                  <X className="size-4 shrink-0" />
                 </Button>
               </div>
             );
@@ -165,7 +165,7 @@ export const CollaboratorAdd = (props: ICollaboratorAddProps) => {
               key={member.id}
               className="flex items-center gap-1.5 rounded-full border p-1 text-[13px]"
             >
-              <Building2 className="ml-2 size-4" />
+              <Building2 className="ms-2 size-4" />
               {member.data.name}
               <Button
                 className="h-6"
@@ -176,7 +176,7 @@ export const CollaboratorAdd = (props: ICollaboratorAddProps) => {
                   deleteMember(member.id);
                 }}
               >
-                <X />
+                <X className="size-4 shrink-0" />
               </Button>
             </div>
           );

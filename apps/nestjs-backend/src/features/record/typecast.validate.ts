@@ -1,9 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
+  FieldCore,
+  IAttachmentCellValueRo,
   IAttachmentItem,
+  IAttachmentItemRo,
   ILinkCellValue,
   ISelectFieldChoice,
   ISelectFieldOptions,
+  IUserCellValue,
   UserFieldCore,
 } from '@teable/core';
 import {
@@ -11,16 +15,18 @@ import {
   FieldType,
   generateAttachmentId,
   generateChoiceId,
+  HttpErrorCode,
   IdPrefix,
   nullsToUndefined,
 } from '@teable/core';
 import type { PrismaService } from '@teable/db-main-prisma';
 import { isObject, keyBy, map } from 'lodash';
 import { fromZodError } from 'zod-validation-error';
+import { CustomHttpException } from '../../custom.exception';
 import type { AttachmentsStorageService } from '../attachments/attachments-storage.service';
 import type { CollaboratorService } from '../collaborator/collaborator.service';
+import type { DataLoaderService } from '../data-loader/data-loader.service';
 import type { FieldConvertingService } from '../field/field-calculate/field-converting.service';
-import type { IFieldInstance } from '../field/model/factory';
 import type { LinkFieldDto } from '../field/model/field-dto/link-field.dto';
 import type { MultipleSelectFieldDto } from '../field/model/field-dto/multiple-select-field.dto';
 import type { SingleSelectFieldDto } from '../field/model/field-dto/single-select-field.dto';
@@ -33,6 +39,7 @@ interface IServices {
   recordService: RecordService;
   attachmentsStorageService: AttachmentsStorageService;
   collaboratorService: CollaboratorService;
+  dataLoaderService: DataLoaderService;
 }
 
 interface IObjectType {
@@ -74,7 +81,7 @@ const convertUser = (input: unknown): string | undefined => {
  */
 export class TypeCastAndValidate {
   private readonly services: IServices;
-  private readonly field: IFieldInstance;
+  private readonly field: FieldCore;
   private readonly tableId: string;
   private readonly typecast?: boolean;
   private cache: Record<string, unknown> = {};
@@ -86,7 +93,7 @@ export class TypeCastAndValidate {
     tableId,
   }: {
     services: IServices;
-    field: IFieldInstance;
+    field: FieldCore;
     typecast?: boolean;
     tableId: string;
   }) {
@@ -124,7 +131,7 @@ export class TypeCastAndValidate {
       case FieldType.Attachment:
         return await this.castToAttachment(cellValues);
       case FieldType.Date:
-        return await this.castToDate(cellValues);
+        return this.castToDate(cellValues);
       default:
         return this.defaultCastTo(cellValues);
     }
@@ -141,24 +148,34 @@ export class TypeCastAndValidate {
    */
   private mapFieldsCellValuesWithValidate(
     cellValues: unknown[],
-    callBack: (cellValue: unknown) => unknown
+    callBack: (cellValue: unknown) => unknown,
+    validateBusinessRules?: (cellValue: unknown) => unknown
   ) {
     return cellValues.map((cellValue) => {
       if (cellValue === undefined) {
         return;
       }
-      const validate = this.field.validateCellValue(cellValue);
+      const validate = this.field.validateCellValueWithNotNull(cellValue);
+      if (!validate) return;
       if (!validate.success) {
         if (this.typecast) {
           return callBack(cellValue);
-        } else {
-          throw new BadRequestException(fromZodError(validate.error).message);
+        } else if (validate?.error) {
+          throw new CustomHttpException(
+            `Cell value ${cellValue} typecast field ${this.field.name}[${this.field.id}] validation failed: ${fromZodError(validate.error).message}`,
+            HttpErrorCode.VALIDATION_ERROR,
+            {
+              localization: {
+                i18nKey: 'httpErrors.typecast.cellValueValidationFailed',
+              },
+            }
+          );
         }
       }
       if (this.field.type === FieldType.SingleLineText || this.field.type === FieldType.LongText) {
         return this.field.convertStringToCellValue(validate.data as string);
       }
-      return validate.data == null ? null : validate.data;
+      return validate.data == null ? null : validateBusinessRules?.(validate.data) ?? validate.data;
     });
   }
 
@@ -174,12 +191,15 @@ export class TypeCastAndValidate {
       return value.filter((v) => v != null && v !== '').map((v) => String(v).trim());
     }
     if (typeof value === 'string') {
-      return [value.trim()];
+      const trimValue = value.trim();
+      return trimValue ? [trimValue] : null;
     }
     const strValue = String(value);
     if (strValue != null) {
-      return [String(value).trim()];
+      const trimValue = strValue.trim();
+      return trimValue ? [trimValue] : null;
     }
+
     return null;
   }
 
@@ -191,7 +211,9 @@ export class TypeCastAndValidate {
     if (!choicesNames.length) {
       return;
     }
-    const { id, type, options } = this.field as SingleSelectFieldDto | MultipleSelectFieldDto;
+    const { id, type, options, aiConfig } = this.field as
+      | SingleSelectFieldDto
+      | MultipleSelectFieldDto;
     const existsChoicesNameMap = this.cache.choicesMap as Record<string, ISelectFieldChoice>;
     const notExists = choicesNames.filter((name) => !existsChoicesNameMap[name]);
     const colors = ColorUtils.randomColor(map(options.choices, 'color'), notExists.length);
@@ -207,6 +229,7 @@ export class TypeCastAndValidate {
       id,
       {
         type,
+        aiConfig,
         options: {
           ...options,
           choices: options.choices.concat(newChoices),
@@ -215,6 +238,7 @@ export class TypeCastAndValidate {
     );
 
     await this.services.fieldConvertingService.stageAlter(this.tableId, newField, this.field);
+    await this.services.dataLoaderService.field.clear();
   }
 
   /**
@@ -234,7 +258,12 @@ export class TypeCastAndValidate {
 
     if (preventAutoNewOptions) {
       return newCellValues
-        ? newCellValues.map((v) => (existsChoicesNameMap[v] ? v : null))
+        ? newCellValues.map((v) => {
+            if (v === undefined) {
+              return undefined;
+            }
+            return existsChoicesNameMap[v] ? v : null;
+          })
         : newCellValues;
     }
 
@@ -242,12 +271,13 @@ export class TypeCastAndValidate {
     return newCellValues;
   }
 
-  private async castToDate(cellValues: unknown[]): Promise<unknown[]> {
+  private castToDate(cellValues: unknown[]): unknown[] {
     return cellValues.map((cellValue) => {
       if (cellValue === undefined) {
         return;
       }
       const validate = this.field.validateCellValue(cellValue);
+      if (!validate) return;
       if (!validate.success) {
         return this.field.repair(cellValue);
       }
@@ -303,44 +333,132 @@ export class TypeCastAndValidate {
   }
 
   private async castToUser(cellValues: unknown[]): Promise<unknown[]> {
-    let ctx: { id: string; name: string; email: string }[] = [];
-    if (this.typecast) {
-      const userStrArray = cellValues.map((v) => {
-        const stringCv = convertUser(v);
-        if (!stringCv) {
-          return [];
-        }
-        const stringCvArr = stringCv.split(',').map((s) => s.trim());
-        if (this.field.isMultipleCellValue) {
-          return stringCvArr;
-        }
-        return stringCvArr[0];
-      });
-      ctx = await this.services.collaboratorService.getUserCollaboratorsByTableId(this.tableId, {
+    const userStrArray = cellValues.map((v) => {
+      const stringCv = convertUser(v);
+      if (!stringCv) {
+        return [];
+      }
+      const stringCvArr = stringCv.split(',').map((s) => s.trim());
+      if (this.field.isMultipleCellValue) {
+        return stringCvArr;
+      }
+      return stringCvArr[0];
+    });
+    const ctx = await this.services.collaboratorService.getUserCollaboratorsByTableId(
+      this.tableId,
+      {
         containsIn: {
           keys: ['id', 'name', 'email', 'phone'],
           values: userStrArray.flat(),
         },
-      });
-    }
-
-    return this.mapFieldsCellValuesWithValidate(cellValues, (cellValue: unknown) => {
-      const strValue = convertUser(cellValue);
-      if (strValue) {
-        const cv = (this.field as UserFieldCore).convertStringToCellValue(strValue, {
-          userSets: ctx,
-        });
-        if (Array.isArray(cv)) {
-          return cv.map(UserFieldDto.fullAvatarUrl);
-        }
-        return cv ? UserFieldDto.fullAvatarUrl(cv) : cv;
       }
-      return null;
+    );
+
+    const userMap = keyBy(ctx, 'id');
+
+    return this.mapFieldsCellValuesWithValidate(
+      cellValues,
+      (cellValue: unknown) => {
+        const strValue = convertUser(cellValue);
+        if (strValue) {
+          const cv = (this.field as UserFieldCore).convertStringToCellValue(strValue, {
+            userSets: ctx,
+          });
+          if (Array.isArray(cv)) {
+            return cv.map(UserFieldDto.fullAvatarUrl);
+          }
+          return cv ? UserFieldDto.fullAvatarUrl(cv) : cv;
+        }
+        return null;
+      },
+      (validatedCellValue: unknown) => {
+        if (this.field.isMultipleCellValue) {
+          const notInUserMap = (validatedCellValue as IUserCellValue[]).find((v) => !userMap[v.id]);
+          if (notInUserMap) {
+            throw new CustomHttpException(
+              `User(${notInUserMap.id}) not found in table(${this.tableId})`,
+              HttpErrorCode.VALIDATION_ERROR,
+              {
+                localization: {
+                  i18nKey: 'httpErrors.user.notFound',
+                },
+              }
+            );
+          }
+          return (validatedCellValue as IUserCellValue[]).map((v) => {
+            const user = userMap[v.id];
+            return UserFieldDto.fullAvatarUrl({
+              id: user.id,
+              title: user.name,
+              email: user.email,
+            });
+          });
+        }
+        const user = userMap[(validatedCellValue as IUserCellValue).id];
+        if (!user) {
+          throw new CustomHttpException(
+            `User(${(validatedCellValue as IUserCellValue).id}) not found in table(${this.tableId})`,
+            HttpErrorCode.VALIDATION_ERROR,
+            {
+              localization: {
+                i18nKey: 'httpErrors.user.notFound',
+              },
+            }
+          );
+        }
+        return UserFieldDto.fullAvatarUrl({
+          id: user.id,
+          title: user.name,
+          email: user.email,
+        });
+      }
+    );
+  }
+
+  private async getAttachmentCvMapByCv(cellValues: unknown[]): Promise<
+    Record<
+      string,
+      {
+        token: string;
+        size: number;
+        mimetype: string;
+        width: number | null;
+        height: number | null;
+        path: string;
+      }
+    >
+  > {
+    const tokens = cellValues
+      .flat()
+      .flatMap((v) => {
+        if (isObject(v) && 'token' in v && typeof v.token === 'string') {
+          return [v.token];
+        }
+      })
+      .filter(Boolean) as string[];
+    if (tokens.length === 0) {
+      return {};
+    }
+    const attachmentMetadata = await this.services.prismaService.attachments.findMany({
+      where: { token: { in: tokens } },
+      select: {
+        token: true,
+        size: true,
+        mimetype: true,
+        width: true,
+        height: true,
+        path: true,
+      },
     });
+    return keyBy(
+      attachmentMetadata.map((a) => ({ ...a, size: Number(a.size) })),
+      'token'
+    );
   }
 
   private async castToAttachment(cellValues: unknown[]): Promise<unknown[]> {
     const attachmentItemsMap = this.typecast ? await this.getAttachmentItemMap(cellValues) : {};
+    const attachmentCvMap = await this.getAttachmentCvMapByCv(cellValues);
     const unsignedValues = this.mapFieldsCellValuesWithValidate(
       cellValues,
       (cellValue: unknown) => {
@@ -351,10 +469,38 @@ export class TypeCastAndValidate {
             return result;
           }
         }
+      },
+      (validatedCellValue: unknown) => {
+        const attachmentCellValue = validatedCellValue as IAttachmentCellValueRo;
+        const notInAttachmentMap = attachmentCellValue.find((v) => !attachmentCvMap[v.token]);
+        if (notInAttachmentMap) {
+          throw new CustomHttpException(
+            `Attachment(${notInAttachmentMap.token}) not found`,
+            HttpErrorCode.VALIDATION_ERROR,
+            {
+              localization: {
+                i18nKey: 'httpErrors.attachment.notFound',
+              },
+            }
+          );
+        }
+        const idsSet = new Set<string>();
+        return attachmentCellValue.map((v: IAttachmentItemRo) => {
+          let id = v.id ?? generateAttachmentId();
+          if (idsSet.has(id)) {
+            id = generateAttachmentId(); // duplicate id, generate new one
+          }
+          idsSet.add(id);
+          return {
+            ...nullsToUndefined(attachmentCvMap[v.token]),
+            name: v.name,
+            id,
+          };
+        });
       }
     );
 
-    const allAttachmentsPromises = unsignedValues.map((cellValues) => {
+    return unsignedValues.map((cellValues) => {
       const attachmentCellValue = cellValues as (IAttachmentItem & {
         thumbnailPath?: { sm?: string; lg?: string };
       })[];
@@ -362,9 +508,8 @@ export class TypeCastAndValidate {
         return attachmentCellValue;
       }
 
-      return Promise.all(attachmentCellValue);
+      return attachmentCellValue;
     });
-    return await Promise.all(allAttachmentsPromises);
   }
 
   /**
@@ -410,8 +555,26 @@ export class TypeCastAndValidate {
     // Extract and flatten attachment IDs from cell values
     const attachmentIds = cellValues
       .flat()
-      .flatMap((v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()) : []))
-      .filter((v) => v.startsWith(IdPrefix.Attachment));
+      .flatMap((v) => {
+        if (typeof v === 'string') {
+          return v.split(',').map((s) => s.trim());
+        }
+        if (Array.isArray(v)) {
+          return v
+            .map((v) => {
+              if (typeof v === 'string') {
+                return v;
+              }
+              if (isObject(v) && 'id' in v && typeof v.id === 'string') {
+                return v.id;
+              }
+              return undefined;
+            })
+            .filter(Boolean) as string[];
+        }
+        return [];
+      })
+      .filter((v) => v?.startsWith(IdPrefix.Attachment));
 
     // Fetch attachment metadata from attachmentsTable
     const attachmentMetadata = await this.services.prismaService.attachmentsTable.findMany({
@@ -442,6 +605,7 @@ export class TypeCastAndValidate {
       const metadata = metadataMap[detail.token];
       acc[metadata.attachmentId] = {
         ...nullsToUndefined(detail),
+        size: Number(detail.size),
         name: metadata.name,
         id: generateAttachmentId(),
       };

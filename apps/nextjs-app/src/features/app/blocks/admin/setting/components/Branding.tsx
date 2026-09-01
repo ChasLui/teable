@@ -1,4 +1,4 @@
-import { Label, sonner } from '@teable/ui-lib/shadcn';
+import { Label } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
 import { useState } from 'react';
 import { settingPluginConfig } from '@/features/i18n/setting-plugin.config';
@@ -8,16 +8,18 @@ export const Branding = ({
   brandName,
   brandLogo,
   onChange,
+  disabled,
 }: {
   brandName?: string | null;
   brandLogo?: string | null;
-  onChange: (brandName: string) => void;
+  onChange: (brandName: string) => Promise<unknown> | void;
+  disabled?: boolean;
 }) => {
   const { t } = useTranslation(settingPluginConfig.i18nNamespaces);
   const [name, setName] = useState(brandName || '');
 
   return (
-    <div className="py-4">
+    <div className="pb-6">
       <h2 className="mb-4 text-lg font-medium">{t('admin.setting.brandingSettings.title')}</h2>
       <div className="flex w-full flex-col space-y-4">
         <div className="space-y-2 rounded-lg border p-4 shadow-sm">
@@ -30,12 +32,14 @@ export const Branding = ({
               className="rounded-md border px-3 py-2"
               placeholder="Teable"
               value={name}
+              disabled={disabled}
               onChange={(e) => {
                 setName(e.target.value);
               }}
               onBlur={() => {
-                onChange(name);
-                sonner.toast(t('common:actions.saveSucceed'));
+                if (name !== (brandName || '')) {
+                  void onChange(name);
+                }
               }}
             />
           </div>

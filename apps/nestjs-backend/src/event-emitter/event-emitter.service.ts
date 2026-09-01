@@ -73,11 +73,11 @@ export class EventEmitterService {
     private readonly cls: ClsService<IClsStore>
   ) {}
 
-  emit(event: string, data: unknown | unknown[]): boolean {
+  emit<T extends unknown | unknown[]>(event: string, data: T): boolean {
     return this.eventEmitter.emit(event, data);
   }
 
-  emitAsync(event: string, data: unknown | unknown[]): Promise<boolean[]> {
+  emitAsync<T extends unknown | unknown[]>(event: string, data: T): Promise<boolean[]> {
     return this.eventEmitter.emitAsync(event, data);
   }
 
@@ -87,7 +87,6 @@ export class EventEmitterService {
     if (!generatedEvents) {
       return;
     }
-
     const observable = from(Array.from(generatedEvents.values()));
 
     observable
@@ -114,7 +113,6 @@ export class EventEmitterService {
 
   private combineEvents(groupedEvents: OpEvent[]): OpEvent {
     if (groupedEvents.length <= 1) return groupedEvents[0];
-
     return groupedEvents.reduce((combinedEvent, event, index) => {
       const mergePropertyName = this.getMergePropertyName(event);
 
@@ -130,7 +128,11 @@ export class EventEmitterService {
 
   private getMergePropertyName(event: OpEvent): string {
     return match(event)
-      .with({ name: Events.TABLE_VIEW_CREATE }, () => 'view')
+      .with(
+        P.union({ name: Events.TABLE_VIEW_CREATE }, { name: Events.TABLE_VIEW_UPDATE }),
+        () => 'view'
+      )
+      .with({ name: Events.TABLE_VIEW_DELETE }, () => 'viewId')
       .with(
         P.union({ name: Events.TABLE_FIELD_CREATE }, { name: Events.TABLE_FIELD_UPDATE }),
         () => 'field'
@@ -158,7 +160,7 @@ export class EventEmitterService {
   }
 
   private handleEventResult(result: OpEvent): void {
-    this.logger.debug({ eventName: result.name, eventList: result });
+    // this.logger.debug({ eventName: result.name, eventList: result });
     this.emitAsync(result.name, result);
   }
 
@@ -190,7 +192,6 @@ export class EventEmitterService {
           opCreateData: rawOp.create?.data,
           ops: rawOp?.op,
         }) as OpEvent;
-
         const event = this.createEvent(docType, opType, {
           ...extendPlainContext,
           ...plainContext,
@@ -200,7 +201,9 @@ export class EventEmitterService {
           },
         });
 
-        event && this.mergeEventsForUpdate(eventManager, id, event);
+        if (event) {
+          this.mergeEventsForUpdate(eventManager, id, event);
+        }
       }
     }
   }
@@ -208,6 +211,7 @@ export class EventEmitterService {
   private createExtendPlainContext(docId: string, id: string) {
     const user = this.cls.get('user');
     const entry = this.cls.get('entry');
+    const recordRemovalReason = this.cls.get('recordRemovalReason');
     return {
       baseId: docId,
       tableId: id.startsWith(IdPrefix.Table) ? id : docId,
@@ -217,6 +221,7 @@ export class EventEmitterService {
       context: {
         user,
         entry,
+        recordRemovalReason,
       },
     };
   }
@@ -240,19 +245,31 @@ export class EventEmitterService {
       return;
     }
 
+    const { rawOpType } = existingEvent;
+
     if (
-      [RawOpType.Create, RawOpType.Edit].includes(existingEvent.rawOpType) &&
+      [RawOpType.Create, RawOpType.Edit].includes(rawOpType) &&
       event.name === Events.TABLE_RECORD_UPDATE
     ) {
-      const fields = this.getUpdateFieldsFromEvent(event as RecordUpdateEvent);
+      const fields = this.getUpdateFieldsFromEvent(event as RecordUpdateEvent, rawOpType);
       event = this.combineUpdateEvents(existingEvent as RecordCreateEvent, fields);
     }
 
     eventManager.set(id, event);
   }
 
-  private getUpdateFieldsFromEvent(event: RecordUpdateEvent): { [key: string]: unknown } {
-    return Object.entries((event.payload.record as IChangeRecord).fields).reduce(
+  private getUpdateFieldsFromEvent(
+    event: RecordUpdateEvent,
+    existedRawOpType: RawOpType
+  ): { [key: string]: unknown } {
+    const { payload } = event;
+    const fields = (payload.record as IChangeRecord).fields;
+
+    if (existedRawOpType === RawOpType.Edit) {
+      return fields;
+    }
+
+    return Object.entries(fields).reduce(
       (acc, [key, value]) => {
         acc[key] = value.newValue;
         return acc;

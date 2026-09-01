@@ -11,13 +11,16 @@ export const getSyncCopyData = ({
   recordMap,
   fields,
   selection,
+  rowCount,
 }: {
   recordMap: IRecordIndexMap;
   fields: Field[];
   selection: CombinedSelection;
+  rowCount: number;
 }) => {
   const ranges = selection.serialize();
   const content: string[][] = [];
+  const rawContent: unknown[][] = [];
   let headers: IFieldVo[] = [];
 
   switch (selection.type) {
@@ -28,13 +31,16 @@ export const getSyncCopyData = ({
         .map((field) => fieldVoSchema.parse(field));
       for (let rowIndex = startRowIndex; rowIndex <= endRowIndex; rowIndex++) {
         const rowContent: string[] = [];
+        const rawRowContent: unknown[] = [];
         for (let columnIndex = startColumnIndex; columnIndex <= endColumnIndex; columnIndex++) {
           const record = recordMap[rowIndex];
           const field = fields[columnIndex];
           const fieldValue = field.cellValue2String(record?.fields[field.id]);
           rowContent.push(fieldValue);
+          rawRowContent.push(record?.fields[field.id]);
         }
         content.push(rowContent);
+        rawContent.push(rawRowContent);
       }
       break;
     }
@@ -48,7 +54,12 @@ export const getSyncCopyData = ({
             const record = recordMap[rowIndex];
             return field.cellValue2String(record?.fields[field.id]);
           });
+          const rawRowContent: unknown[] = fields.map((field) => {
+            const record = recordMap[rowIndex];
+            return record?.fields[field.id];
+          });
           content.push(rowContent);
+          rawContent.push(rawRowContent);
         }
       }
       break;
@@ -62,16 +73,17 @@ export const getSyncCopyData = ({
           fields.slice(startColIndex, endColIndex + 1).map((field) => field)
         );
       }
-      Object.keys(recordMap)
-        .sort((a, b) => Number(a) - Number(b))
-        .forEach((recordIndex) => {
-          const record = recordMap[recordIndex];
-          if (!record) return;
-          const rowContent: string[] = selectedFields.map((field) =>
-            field.cellValue2String(record.fields[field.id])
-          );
-          content.push(rowContent);
-        });
+      // recordMap may retain stale cache entries beyond the visible rows (e.g. records
+      // filtered out after an edit), so iterate by row index instead of map keys
+      Array.from({ length: rowCount }, (_, rowIndex) => recordMap[rowIndex]).forEach((record) => {
+        if (!record) return;
+        const rowContent: string[] = selectedFields.map((field) =>
+          field.cellValue2String(record.fields[field.id])
+        );
+        const rawRowContent: unknown[] = selectedFields.map((field) => record.fields[field.id]);
+        content.push(rowContent);
+        rawContent.push(rawRowContent);
+      });
 
       headers = selectedFields.map((field) => fieldVoSchema.parse(field));
       break;
@@ -80,5 +92,5 @@ export const getSyncCopyData = ({
       throw new Error('Unsupported selection type');
   }
   const contentString = stringifyClipboardText(content);
-  return { content: contentString, header: headers };
+  return { content: contentString, headers, rawContent };
 };

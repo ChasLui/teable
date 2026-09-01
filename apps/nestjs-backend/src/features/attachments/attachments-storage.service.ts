@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { HttpErrorCode } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { UploadType } from '@teable/openapi';
+import sharp from 'sharp';
 import { CacheService } from '../../cache/cache.service';
 import { IStorageConfig, StorageConfig } from '../../configs/storage';
+import { CustomHttpException } from '../../custom.exception';
 import { EventEmitterService } from '../../event-emitter/event-emitter.service';
 import { Events } from '../../event-emitter/events';
 import {
@@ -10,10 +13,19 @@ import {
   getTableThumbnailToken,
 } from '../../utils/generate-thumbnail-path';
 import { second } from '../../utils/second';
-import { ATTACHMENT_LG_THUMBNAIL_HEIGHT, ATTACHMENT_SM_THUMBNAIL_HEIGHT } from './constant';
+import {
+  ATTACHMENT_LG_THUMBNAIL_HEIGHT,
+  ATTACHMENT_SM_THUMBNAIL_HEIGHT,
+  ATTACHMENT_THUMBNAIL_DEFAULT_MIMETYPE,
+} from './constant';
 import StorageAdapter from './plugins/adapter';
 import { InjectStorageAdapter } from './plugins/storage';
 import type { IRespHeaders } from './plugins/types';
+import {
+  getFreshPreviewCacheUrl,
+  getPreviewCacheKey,
+  getPreviewUrlConfigSig,
+} from './plugins/utils';
 
 @Injectable()
 export class AttachmentsStorageService {
@@ -55,7 +67,11 @@ export class AttachmentsStorageService {
       },
     });
     if (!attachment) {
-      throw new BadRequestException(`Invalid token: ${token}`);
+      throw new CustomHttpException('Invalid token', HttpErrorCode.VALIDATION_ERROR, {
+        localization: {
+          i18nKey: 'httpErrors.attachment.invalidToken',
+        },
+      });
     }
     const urlArray: string[] = [];
     for (const item of attachment) {
@@ -76,17 +92,22 @@ export class AttachmentsStorageService {
     expiresIn: number = this.urlExpireIn,
     respHeaders?: IRespHeaders
   ) {
-    const previewCache = await this.cacheService.get(`attachment:preview:${token}`);
-    let url = previewCache?.url;
+    // Use 50% of URL expiration time for cache TTL to ensure URLs are refreshed
+    // before they expire, preventing stale URLs after deployments
+    const cacheTtl = Math.floor(expiresIn * 0.5);
+    const cacheKey = getPreviewCacheKey(token);
+    const previewCache = await this.cacheService.get(cacheKey);
+    let url = getFreshPreviewCacheUrl(previewCache);
     if (!url) {
       url = await this.storageAdapter.getPreviewUrl(bucket, path, expiresIn, respHeaders);
       await this.cacheService.set(
-        `attachment:preview:${token}`,
+        cacheKey,
         {
           url,
           expiresIn,
+          configSig: getPreviewUrlConfigSig(),
         },
-        expiresIn
+        cacheTtl
       );
     }
     return url;
@@ -103,6 +124,57 @@ export class AttachmentsStorageService {
         'Content-Type': mimetype,
       }
     );
+  }
+
+  async uploadTableImageThumbnailsFromBuffer(
+    bucket: string,
+    path: string,
+    imageBuffer: Buffer,
+    height: number
+  ) {
+    const mimetype = ATTACHMENT_THUMBNAIL_DEFAULT_MIMETYPE;
+    const { smThumbnailPath, lgThumbnailPath } = generateTableThumbnailPath(path);
+    const image = sharp(imageBuffer, { failOn: 'none', unlimited: true });
+    let cutSmThumbnailPath: string | undefined;
+    let cutLgThumbnailPath: string | undefined;
+
+    if (height > ATTACHMENT_SM_THUMBNAIL_HEIGHT) {
+      const smBuffer = await image
+        .clone()
+        .resize(undefined, ATTACHMENT_SM_THUMBNAIL_HEIGHT)
+        .png()
+        .toBuffer();
+      cutSmThumbnailPath = (
+        await this.storageAdapter.uploadFile(bucket, smThumbnailPath, smBuffer, {
+          // eslint-disable-next-line @typescript-eslint/naming-convention
+          'Content-Type': mimetype,
+        })
+      ).path;
+    }
+
+    if (height > ATTACHMENT_LG_THUMBNAIL_HEIGHT) {
+      const lgBuffer = await image
+        .clone()
+        .resize(undefined, ATTACHMENT_LG_THUMBNAIL_HEIGHT)
+        .png()
+        .toBuffer();
+      cutLgThumbnailPath = (
+        await this.storageAdapter.uploadFile(bucket, lgThumbnailPath, lgBuffer, {
+          // eslint-disable-next-line @typescript-eslint/naming-convention
+          'Content-Type': mimetype,
+        })
+      ).path;
+    }
+
+    this.eventEmitterService.emit(Events.CROP_IMAGE, {
+      bucket,
+      path,
+    });
+
+    return {
+      smThumbnailPath: cutSmThumbnailPath,
+      lgThumbnailPath: cutLgThumbnailPath,
+    };
   }
 
   async cropTableImage(bucket: string, path: string, height: number) {
